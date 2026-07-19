@@ -55,6 +55,7 @@ const weapons = [...weaponGroups]
       throw new Error(`Missing base weapon for definition ${defIndex}.`);
     }
     return {
+      designerName: `weapon_${base.model}`,
       defIndex,
       stickerSchemaCount: base.stickerSchemaCount ?? 5,
       legacyStickerSchemaCount:

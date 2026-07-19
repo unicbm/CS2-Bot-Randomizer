@@ -5,6 +5,7 @@
   },
   "weapons": [
     {
+      "designerName": "weapon_deagle",
       "defIndex": 1,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 4,
@@ -282,6 +283,7 @@
       ]
     },
     {
+      "designerName": "weapon_elite",
       "defIndex": 2,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -547,6 +549,7 @@
       ]
     },
     {
+      "designerName": "weapon_fiveseven",
       "defIndex": 3,
       "stickerSchemaCount": 6,
       "legacyStickerSchemaCount": 7,
@@ -806,6 +809,7 @@
       ]
     },
     {
+      "designerName": "weapon_glock",
       "defIndex": 4,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 5,
@@ -1167,6 +1171,7 @@
       ]
     },
     {
+      "designerName": "weapon_ak47",
       "defIndex": 7,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -1540,6 +1545,7 @@
       ]
     },
     {
+      "designerName": "weapon_aug",
       "defIndex": 8,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -1823,6 +1829,7 @@
       ]
     },
     {
+      "designerName": "weapon_awp",
       "defIndex": 9,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 5,
@@ -2142,6 +2149,7 @@
       ]
     },
     {
+      "designerName": "weapon_famas",
       "defIndex": 10,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 6,
@@ -2413,6 +2421,7 @@
       ]
     },
     {
+      "designerName": "weapon_g3sg1",
       "defIndex": 11,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -2600,6 +2609,7 @@
       ]
     },
     {
+      "designerName": "weapon_galilar",
       "defIndex": 13,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -2871,6 +2881,7 @@
       ]
     },
     {
+      "designerName": "weapon_m249",
       "defIndex": 14,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -3034,6 +3045,7 @@
       ]
     },
     {
+      "designerName": "weapon_m4a1",
       "defIndex": 16,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 7,
@@ -3353,6 +3365,7 @@
       ]
     },
     {
+      "designerName": "weapon_mac10",
       "defIndex": 17,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 4,
@@ -3702,6 +3715,7 @@
       ]
     },
     {
+      "designerName": "weapon_p90",
       "defIndex": 19,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -4021,6 +4035,7 @@
       ]
     },
     {
+      "designerName": "weapon_mp5sd",
       "defIndex": 23,
       "stickerSchemaCount": 6,
       "legacyStickerSchemaCount": 8,
@@ -4172,6 +4187,7 @@
       ]
     },
     {
+      "designerName": "weapon_ump45",
       "defIndex": 24,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -4449,6 +4465,7 @@
       ]
     },
     {
+      "designerName": "weapon_xm1014",
       "defIndex": 25,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -4726,6 +4743,7 @@
       ]
     },
     {
+      "designerName": "weapon_bizon",
       "defIndex": 26,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -4967,6 +4985,7 @@
       ]
     },
     {
+      "designerName": "weapon_mag7",
       "defIndex": 27,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -5196,6 +5215,7 @@
       ]
     },
     {
+      "designerName": "weapon_negev",
       "defIndex": 28,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -5353,6 +5373,7 @@
       ]
     },
     {
+      "designerName": "weapon_sawedoff",
       "defIndex": 29,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -5576,6 +5597,7 @@
       ]
     },
     {
+      "designerName": "weapon_tec9",
       "defIndex": 30,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 5,
@@ -5871,6 +5893,7 @@
       ]
     },
     {
+      "designerName": "weapon_taser",
       "defIndex": 31,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -5920,6 +5943,7 @@
       ]
     },
     {
+      "designerName": "weapon_hkp2000",
       "defIndex": 32,
       "stickerSchemaCount": 6,
       "legacyStickerSchemaCount": 5,
@@ -6143,6 +6167,7 @@
       ]
     },
     {
+      "designerName": "weapon_mp7",
       "defIndex": 33,
       "stickerSchemaCount": 6,
       "legacyStickerSchemaCount": 6,
@@ -6390,6 +6415,7 @@
       ]
     },
     {
+      "designerName": "weapon_mp9",
       "defIndex": 34,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 5,
@@ -6679,6 +6705,7 @@
       ]
     },
     {
+      "designerName": "weapon_nova",
       "defIndex": 35,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -6968,6 +6995,7 @@
       ]
     },
     {
+      "designerName": "weapon_p250",
       "defIndex": 36,
       "stickerSchemaCount": 6,
       "legacyStickerSchemaCount": 7,
@@ -7323,6 +7351,7 @@
       ]
     },
     {
+      "designerName": "weapon_scar20",
       "defIndex": 38,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -7528,6 +7557,7 @@
       ]
     },
     {
+      "designerName": "weapon_sg556",
       "defIndex": 39,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -7763,6 +7793,7 @@
       ]
     },
     {
+      "designerName": "weapon_ssg08",
       "defIndex": 40,
       "stickerSchemaCount": 4,
       "legacyStickerSchemaCount": 4,
@@ -8028,6 +8059,7 @@
       ]
     },
     {
+      "designerName": "weapon_m4a1_silencer",
       "defIndex": 60,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -8311,6 +8343,7 @@
       ]
     },
     {
+      "designerName": "weapon_usp_silencer",
       "defIndex": 61,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,
@@ -8588,6 +8621,7 @@
       ]
     },
     {
+      "designerName": "weapon_cz75a",
       "defIndex": 63,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 6,
@@ -8817,6 +8851,7 @@
       ]
     },
     {
+      "designerName": "weapon_revolver",
       "defIndex": 64,
       "stickerSchemaCount": 5,
       "legacyStickerSchemaCount": 5,

@@ -4,7 +4,7 @@ CounterStrikeSharp plugin that gives each bot a stable cosmetic loadout: agent,
 music kit, knife, gloves, weapon paint, up to five stickers, and an optional
 charm.
 
-## What changed in 1.3
+## What changed in 1.4
 
 - Weapon paints, knife paints, gloves, stickers, charms, model-specific sticker
   schemas, and wear ranges come from the bundled `cosmetic_catalog.json`.
@@ -15,10 +15,19 @@ charm.
   required by CS2's `stored_as_integer` economic attributes.
 - Sticker combinations reserve distinct weapon wear values to avoid the CS2
   client material cache displaying another bot's stickers.
-- A bot owns one complete loadout. Per-slot callbacks capture both its user ID
-  and loadout generation; newly spawned weapons are instead re-resolved from
-  their final owner's live pawn inventory. Stale callbacks cannot write after a
-  team change, reroll, disconnect, slot reuse, or external ownership handoff.
+- A bot owns one complete loadout. Weapon paint, sticker, and charm attributes
+  are supplied in a preconstructed `CEconItemView` before `GiveNamedItem`
+  creates the weapon. The plugin no longer clears or rebuilds economic
+  attributes on live gun entities.
+- BotBuy replacement guns use the same engine construction hook as normal
+  purchases, so the final M4A4, M4A1-S, MP5-SD, and PP-Bizon no longer depend
+  on guessed post-purchase retry delays.
+- Knife and glove writes are fingerprinted by bot, pawn, entity, and cosmetic
+  selection. Spawn retries become no-ops after the intended economic state has
+  already been installed.
+- Per-slot callbacks capture both the user ID and loadout generation. Stale
+  callbacks cannot write after a team change, reroll, disconnect, slot reuse,
+  or external ownership handoff.
 - `BotRandomizer.API` exposes expiring per-slot, per-scope leases for replay or
   override plugins. Releasing a lease restores the frozen random baseline by
   default.
@@ -31,16 +40,17 @@ knife, or glove definition; it does not guess IDs from numeric ranges.
 
 - Each `(bot slot, weapon definition)` gets one stable weapon selection until a
   team change, map change, or explicit reroll.
-- Weapon entities are skinned only after `OnEntitySpawned` and a matching entry
-  in the owner's `pawn.WeaponServices.MyWeapons`; the plugin does not mutate the
-  transient return object inside the native `GiveNamedItem` hook.
+- Weapon entities are born with their complete cosmetic state through the
+  `GiveNamedItem` pre-hook. Only the constructed item view's
+  `NetworkedDynamicAttributes` list is populated; no live-weapon attribute list
+  is cleared or rewritten afterward.
 - A weapon receives `0..5` stickers. Sticker slots are contiguous and each
   schema index is constrained to the selected paint's actual HD/legacy model.
 - A weapon has a 50% chance to receive one charm in keychain slot `0`.
 - Charm seeds stay in CS2's valid `1..100000` range.
 - Sticker Slab (keychain definition `37`) also receives a real sticker kit ID.
-- Economic attributes are cleared and rebuilt atomically from the cached
-  selection, then `m_AttributeManager` is marked changed.
+- Weapon setting changes and rerolls affect the next weapon constructed for
+  that bot. They deliberately do not rewrite a gun that is already live.
 
 ## Commands
 
@@ -85,9 +95,11 @@ C:\Users\Uni\.dotnet\dotnet.exe run `
   -c Release -- cosmetic_catalog.json
 ```
 
-The self-test validates catalog counts and provenance, integer attribute bit
-encoding, sticker schema bounds, Sticker Slab payloads, keychain seed bounds,
-wear-cache isolation, and ownership lease expiry.
+The self-test validates catalog counts and provenance, exact designer-name to
+definition-index mappings (including BotBuy's CT replacement guns), integer
+attribute bit encoding, process-unique custom item IDs, sticker schema bounds,
+Sticker Slab payloads, keychain seed bounds, wear-cache isolation, and
+ownership lease expiry.
 
 ## Refresh the catalog
 

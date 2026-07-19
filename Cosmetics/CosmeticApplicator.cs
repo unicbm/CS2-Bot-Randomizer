@@ -8,12 +8,10 @@ namespace BotRandomizer;
 
 internal sealed class CosmeticApplicator
 {
-    private const ulong MinimumCustomItemId = 65155030971;
-
     private readonly MemoryFunctionWithReturn<nint, string, float, int>? _setAttributeByName;
     private readonly ILogger _logger;
-    private ulong _nextItemId = MinimumCustomItemId;
-    private bool _weaponErrorLogged;
+    private readonly Dictionary<int, AppliedKnifeCosmetic> _appliedKnives = [];
+    private readonly Dictionary<int, AppliedGloveCosmetic> _appliedGloves = [];
 
     internal CosmeticApplicator(
         MemoryFunctionWithReturn<nint, string, float, int>? setAttributeByName,
@@ -24,6 +22,18 @@ internal sealed class CosmeticApplicator
     }
 
     internal bool NativeAvailable => _setAttributeByName is not null;
+
+    internal void ClearSlot(int slot)
+    {
+        _appliedKnives.Remove(slot);
+        _appliedGloves.Remove(slot);
+    }
+
+    internal void Reset()
+    {
+        _appliedKnives.Clear();
+        _appliedGloves.Clear();
+    }
 
     internal void ApplyAgent(CCSPlayerPawn pawn, string model)
     {
@@ -37,70 +47,10 @@ internal sealed class CosmeticApplicator
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_clrRender");
     }
 
-    internal bool ApplyWeapon(
-        CBasePlayerWeapon weapon,
-        WeaponCosmeticSelection selection,
-        bool includeStickers,
-        bool includeCharms)
-    {
-        if (_setAttributeByName is null || !weapon.IsValid)
-            return false;
-
-        try
-        {
-            var item = weapon.AttributeManager?.Item;
-            if (item is null)
-                return false;
-
-            var attributeList = item.AttributeList;
-            var networkedAttributes = item.NetworkedDynamicAttributes;
-            if (attributeList.Handle == IntPtr.Zero || networkedAttributes.Handle == IntPtr.Zero)
-                return false;
-
-            attributeList.Attributes.RemoveAll();
-            networkedAttributes.Attributes.RemoveAll();
-            AssignItemId(item);
-            // Initialized is for an econ view supplied before GiveNamedItem constructs
-            // the entity; changing it on a live returned weapon is not lifecycle-safe.
-
-            weapon.FallbackPaintKit = selection.PaintKit;
-            weapon.FallbackSeed = selection.Seed;
-            weapon.FallbackWear = selection.Wear;
-            SetTextureAttributes(
-                networkedAttributes,
-                attributeList,
-                selection.PaintKit,
-                selection.Seed,
-                selection.Wear);
-
-            if (includeStickers)
-            {
-                foreach (var sticker in selection.Stickers)
-                    SetStickerAttributes(networkedAttributes, sticker);
-            }
-
-            if (includeCharms && selection.Keychain is not null)
-            {
-                SetKeychainAttributes(networkedAttributes, selection.Keychain);
-                SetKeychainAttributes(attributeList, selection.Keychain);
-            }
-
-            Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
-            weapon.AcceptInput("SetBodygroup", value: $"body,{(selection.Legacy ? 1 : 0)}");
-            return true;
-        }
-        catch (Exception exception)
-        {
-            if (!_weaponErrorLogged)
-            {
-                _weaponErrorLogged = true;
-                _logger.LogError(exception, "[BotRandomizer] Failed to apply weapon cosmetics");
-            }
-            return false;
-        }
-    }
-
-    internal void ApplyKnife(CCSPlayerPawn pawn, KnifeSelection selection)
+    internal void ApplyKnife(
+        CCSPlayerController player,
+        CCSPlayerPawn pawn,
+        KnifeSelection selection)
     {
         if (!pawn.IsValid)
             return;
@@ -119,11 +69,22 @@ internal sealed class CosmeticApplicator
                 if (weapon.DesignerName is not ("weapon_knife" or "weapon_knife_t"))
                     continue;
 
-                weapon.AcceptInput("ChangeSubclass", value: selection.DefIndex.ToString());
                 var item = weapon.AttributeManager?.Item;
                 if (item is null)
                     return;
 
+                var fingerprint = KnifeCosmeticFingerprint.From(selection);
+                if (_appliedKnives.TryGetValue(player.Slot, out var applied)
+                    && applied.PawnHandle == pawn.EntityHandle.Raw
+                    && applied.WeaponHandle == weapon.EntityHandle.Raw
+                    && applied.Fingerprint == fingerprint
+                    && item.ItemID == applied.ItemId
+                    && item.ItemDefinitionIndex == selection.DefIndex)
+                {
+                    return;
+                }
+
+                weapon.AcceptInput("ChangeSubclass", value: selection.DefIndex.ToString());
                 item.ItemDefinitionIndex = selection.DefIndex;
                 item.EntityQuality = 3;
                 if (_setAttributeByName is not null)
@@ -142,6 +103,11 @@ internal sealed class CosmeticApplicator
                         selection.Wear);
                 }
                 Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
+                _appliedKnives[player.Slot] = new AppliedKnifeCosmetic(
+                    pawn.EntityHandle.Raw,
+                    weapon.EntityHandle.Raw,
+                    fingerprint,
+                    item.ItemID);
                 return;
             }
         }
@@ -151,30 +117,58 @@ internal sealed class CosmeticApplicator
         }
     }
 
-    internal void ApplyGloves(CCSPlayerPawn pawn, GloveSelection selection)
+    internal bool ApplyGloves(
+        CCSPlayerController player,
+        CCSPlayerPawn pawn,
+        GloveSelection selection,
+        out bool changed)
     {
+        changed = false;
         if (_setAttributeByName is null || !pawn.IsValid)
-            return;
+            return false;
 
         try
         {
             var item = pawn.EconGloves;
+            var fingerprint = GloveCosmeticFingerprint.From(selection);
+            if (_appliedGloves.TryGetValue(player.Slot, out var applied)
+                && applied.PawnHandle == pawn.EntityHandle.Raw
+                && applied.Fingerprint == fingerprint
+                && item.Initialized
+                && item.ItemID == applied.ItemId
+                && item.ItemDefinitionIndex == applied.ItemDefinitionIndex
+                && item.AccountID == applied.AccountId)
+            {
+                return true;
+            }
+
+            item.ItemDefinitionIndex = selection.DefIndex;
+            item.AccountID = AccountIdFromSteamId(player.SteamID);
+            item.Initialized = true;
+            AssignItemId(item);
             item.NetworkedDynamicAttributes.Attributes.RemoveAll();
             item.AttributeList.Attributes.RemoveAll();
-            item.ItemDefinitionIndex = selection.DefIndex;
-            AssignItemId(item);
             SetTextureAttributes(
                 item.NetworkedDynamicAttributes,
                 item.AttributeList,
                 selection.PaintKit,
                 0,
                 selection.Wear);
-            item.Initialized = true;
+            Utilities.SetStateChanged(pawn, "CCSPlayerPawn", "m_EconGloves");
             pawn.AcceptInput("SetBodygroup", value: "first_or_third_person,0");
+            _appliedGloves[player.Slot] = new AppliedGloveCosmetic(
+                pawn.EntityHandle.Raw,
+                fingerprint,
+                item.ItemID,
+                item.ItemDefinitionIndex,
+                item.AccountID);
+            changed = true;
+            return true;
         }
         catch (Exception exception)
         {
             _logger.LogError(exception, "[BotRandomizer] Failed to apply glove cosmetics");
+            return false;
         }
     }
 
@@ -236,46 +230,59 @@ internal sealed class CosmeticApplicator
         SetAttribute(attributeList, "set item texture wear", wear);
     }
 
-    private void SetStickerAttributes(CAttributeList attributes, StickerSelection sticker)
-    {
-        var slot = $"sticker slot {sticker.Slot}";
-        SetAttribute(attributes, $"{slot} id", AttributeEncoding.UInt32BitsToSingle(sticker.DefIndex));
-        SetAttribute(attributes, $"{slot} schema", AttributeEncoding.UInt32BitsToSingle(sticker.Schema));
-        SetAttribute(attributes, $"{slot} wear", sticker.Wear);
-        if (sticker.Rotation is float rotation)
-            SetAttribute(attributes, $"{slot} rotation", rotation);
-        if (sticker.X is float x)
-            SetAttribute(attributes, $"{slot} offset x", x);
-        if (sticker.Y is float y)
-            SetAttribute(attributes, $"{slot} offset y", y);
-    }
-
-    private void SetKeychainAttributes(CAttributeList attributes, KeychainSelection keychain)
-    {
-        var slot = $"keychain slot {keychain.Slot}";
-        SetAttribute(attributes, $"{slot} id", AttributeEncoding.UInt32BitsToSingle(keychain.DefIndex));
-        SetAttribute(attributes, $"{slot} seed", AttributeEncoding.Int32BitsToSingle(keychain.Seed));
-        if (keychain.Sticker is uint sticker)
-            SetAttribute(attributes, $"{slot} sticker", AttributeEncoding.UInt32BitsToSingle(sticker));
-        if (keychain.X is float x)
-            SetAttribute(attributes, $"{slot} offset x", x);
-        if (keychain.Y is float y)
-            SetAttribute(attributes, $"{slot} offset y", y);
-        if (keychain.Z is float z)
-            SetAttribute(attributes, $"{slot} offset z", z);
-    }
-
     private void SetAttribute(CAttributeList attributes, string name, float value)
     {
         if (_setAttributeByName is not null && attributes.Handle != IntPtr.Zero)
             _setAttributeByName.Invoke(attributes.Handle, name, value);
     }
 
-    private void AssignItemId(CEconItemView item)
+    private static void AssignItemId(CEconItemView item)
     {
-        var itemId = unchecked(_nextItemId++);
+        var itemId = EconItemIdAllocator.Next();
         item.ItemID = itemId;
         item.ItemIDLow = (uint)(itemId & uint.MaxValue);
         item.ItemIDHigh = (uint)(itemId >> 32);
     }
+
+    private static uint AccountIdFromSteamId(ulong steamId)
+    {
+        const ulong steamId64AccountBase = 76_561_197_960_265_728;
+        if (steamId >= steamId64AccountBase)
+        {
+            var accountId = steamId - steamId64AccountBase;
+            return accountId <= uint.MaxValue ? (uint)accountId : 0;
+        }
+        return steamId <= uint.MaxValue ? (uint)steamId : 0;
+    }
+
+    private readonly record struct KnifeCosmeticFingerprint(
+        ushort DefIndex,
+        int PaintKit,
+        int WearBits)
+    {
+        internal static KnifeCosmeticFingerprint From(KnifeSelection selection)
+            => new(selection.DefIndex, selection.PaintKit, BitConverter.SingleToInt32Bits(selection.Wear));
+    }
+
+    private readonly record struct GloveCosmeticFingerprint(
+        ushort DefIndex,
+        int PaintKit,
+        int WearBits)
+    {
+        internal static GloveCosmeticFingerprint From(GloveSelection selection)
+            => new(selection.DefIndex, selection.PaintKit, BitConverter.SingleToInt32Bits(selection.Wear));
+    }
+
+    private readonly record struct AppliedKnifeCosmetic(
+        uint PawnHandle,
+        uint WeaponHandle,
+        KnifeCosmeticFingerprint Fingerprint,
+        ulong ItemId);
+
+    private readonly record struct AppliedGloveCosmetic(
+        uint PawnHandle,
+        GloveCosmeticFingerprint Fingerprint,
+        ulong ItemId,
+        ushort ItemDefinitionIndex,
+        uint AccountId);
 }

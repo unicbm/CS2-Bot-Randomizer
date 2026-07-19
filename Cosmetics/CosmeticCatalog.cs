@@ -6,6 +6,7 @@ namespace BotRandomizer;
 internal sealed class CosmeticCatalog
 {
     private readonly Dictionary<ushort, WeaponCatalogEntry> _weapons;
+    private readonly Dictionary<string, WeaponCatalogEntry> _weaponsByDesignerName;
     private readonly Dictionary<ushort, IReadOnlyList<PaintCatalogEntry>> _knives;
 
     private CosmeticCatalog(CatalogDocument document)
@@ -13,6 +14,9 @@ internal sealed class CosmeticCatalog
         SourceRepository = document.Source.Repository;
         SourceCommit = document.Source.Commit;
         _weapons = document.Weapons.ToDictionary(entry => entry.DefIndex);
+        _weaponsByDesignerName = document.Weapons.ToDictionary(
+            entry => entry.DesignerName,
+            StringComparer.Ordinal);
         _knives = document.Knives.ToDictionary(
             entry => entry.DefIndex,
             entry => (IReadOnlyList<PaintCatalogEntry>)entry.Paints);
@@ -48,6 +52,9 @@ internal sealed class CosmeticCatalog
     internal bool TryGetWeapon(ushort defIndex, out WeaponCatalogEntry entry)
         => _weapons.TryGetValue(defIndex, out entry!);
 
+    internal bool TryGetWeapon(string designerName, out WeaponCatalogEntry entry)
+        => _weaponsByDesignerName.TryGetValue(designerName, out entry!);
+
     internal bool TryGetKnifePaints(ushort defIndex, out IReadOnlyList<PaintCatalogEntry> paints)
         => _knives.TryGetValue(defIndex, out paints!);
 
@@ -72,6 +79,7 @@ internal sealed class CosmeticCatalog
         }
 
         EnsureUnique(document.Weapons.Select(entry => entry.DefIndex), "weapon definition");
+        EnsureUnique(document.Weapons.Select(entry => entry.DesignerName), "weapon designer name");
         EnsureUnique(document.Knives.Select(entry => entry.DefIndex), "knife definition");
         EnsureUnique(document.Gloves.Select(entry => (entry.DefIndex, entry.PaintKit)), "glove variant");
         EnsureUnique(document.StickerKits, "sticker kit");
@@ -80,8 +88,12 @@ internal sealed class CosmeticCatalog
 
         foreach (var weapon in document.Weapons)
         {
-            if (weapon.DefIndex == 0 || weapon.Paints.Count == 0)
+            if (weapon.DefIndex == 0
+                || !weapon.DesignerName.StartsWith("weapon_", StringComparison.Ordinal)
+                || weapon.Paints.Count == 0)
+            {
                 throw new InvalidDataException($"Weapon {weapon.DefIndex} has no valid paints.");
+            }
             if (weapon.StickerSchemaCount <= 0 || weapon.LegacyStickerSchemaCount <= 0)
                 throw new InvalidDataException($"Weapon {weapon.DefIndex} has invalid sticker schemas.");
             ValidatePaints(weapon.Paints, $"weapon {weapon.DefIndex}");

@@ -18,11 +18,26 @@ foreach (var defIndex in new ushort[] { 16, 23, 26, 60 })
     Assert(catalog.TryGetWeapon(defIndex, out var weapon) && weapon.Paints.Count > 0,
         $"BotBuy CT replacement weapon {defIndex}");
 }
+foreach (var (designerName, defIndex) in new (string, ushort)[]
+{
+    ("weapon_m4a1", 16),
+    ("weapon_mp5sd", 23),
+    ("weapon_bizon", 26),
+    ("weapon_m4a1_silencer", 60)
+})
+{
+    Assert(catalog.TryGetWeapon(designerName, out var weapon) && weapon.DefIndex == defIndex,
+        $"GiveNamedItem mapping {designerName}");
+}
+Assert(catalog.Weapons.All(weapon => weapon.DesignerName.StartsWith("weapon_", StringComparison.Ordinal)),
+    "weapon designer names");
 
 Assert(BitConverter.SingleToInt32Bits(AttributeEncoding.UInt32BitsToSingle(0xDEADBEEF))
     == unchecked((int)0xDEADBEEF), "uint attribute bit encoding");
 Assert(BitConverter.SingleToInt32Bits(AttributeEncoding.Int32BitsToSingle(-1234567))
     == -1234567, "int attribute bit encoding");
+var itemIds = Enumerable.Range(0, 32).Select(_ => EconItemIdAllocator.Next()).ToArray();
+Assert(itemIds.Distinct().Count() == itemIds.Length, "custom item IDs are process-unique");
 
 var wearAllocator = new WeaponWearAllocator();
 var paint = new PaintCatalogEntry(7, false, 0.0f, 1.0f);

@@ -12,6 +12,7 @@
     <ProjectReference Include="..\..\BotRandomizer.API\BotRandomizer.API.csproj" />
     <Compile Include="..\..\Cosmetics\AttributeEncoding.cs" Link="Cosmetics\AttributeEncoding.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticCatalog.cs" Link="Cosmetics\CosmeticCatalog.cs" />
+    <Compile Include="..\..\Cosmetics\EconItemIdAllocator.cs" Link="Cosmetics\EconItemIdAllocator.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticModels.cs" Link="Cosmetics\CosmeticModels.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticOwnershipService.cs" Link="Cosmetics\CosmeticOwnershipService.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticRoller.cs" Link="Cosmetics\CosmeticRoller.cs" />

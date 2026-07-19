@@ -2,11 +2,11 @@
 
 ## Ian Lucas CS2 projects
 
-The economic-attribute encoding and material-cache workaround in this project
-were adapted from `ianlucas/cs2-css-inventory-simulator`. The generated
-`cosmetic_catalog.json` is derived from the game-file catalog maintained by
-`ianlucas/cs2-lib`. Exact source revisions are recorded in the catalog and in
-the repository history.
+The preconstructed `CEconItemView` weapon lifecycle, economic-attribute
+encoding, and material-cache workaround in this project were adapted from
+`ianlucas/cs2-css-inventory-simulator`. The generated `cosmetic_catalog.json`
+is derived from the game-file catalog maintained by `ianlucas/cs2-lib`. Exact
+source revisions are recorded in the catalog and in the repository history.
 
 MIT License
 

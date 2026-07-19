@@ -7,6 +7,7 @@ internal sealed record PaintCatalogEntry(
     float WearMax);
 
 internal sealed record WeaponCatalogEntry(
+    string DesignerName,
     ushort DefIndex,
     int StickerSchemaCount,
     int LegacyStickerSchemaCount,

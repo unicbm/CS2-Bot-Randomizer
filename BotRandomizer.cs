@@ -29,7 +29,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private bool _giveNamedItemHooked;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.3.0";
+    public override string ModuleVersion => "1.3.1";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -176,20 +176,30 @@ public sealed class BotRandomizerPlugin : BasePlugin
                 return HookResult.Continue;
             }
 
-            ApplyRandomWeapon(state, weapon);
+            // The returned weapon is not guaranteed to be fully owned/initialized while
+            // GiveNamedItem's post hook is still on the native stack.
+            var weaponEntityHandle = weapon.EntityHandle.Raw;
+            if (weaponEntityHandle == Utilities.InvalidEHandleIndex)
+                return HookResult.Continue;
+
             var slot = state.Slot;
             var userId = state.UserId;
             var generation = state.Generation;
             Server.NextFrame(() =>
             {
-                if (weapon is not { IsValid: true }
-                    || !TryResolveCurrentBot(slot, userId, generation, out _, out _, out var current)
+                if (!TryResolveOwnedBotWeapon(
+                        slot,
+                        userId,
+                        generation,
+                        weaponEntityHandle,
+                        out var current,
+                        out var currentWeapon)
                     || !_ownership.CanWrite(slot, CosmeticScope.Weapons))
                 {
                     return;
                 }
 
-                ApplyRandomWeapon(current, weapon);
+                ApplyRandomWeapon(current, currentWeapon);
             });
         }
         catch (Exception exception)
@@ -457,6 +467,52 @@ public sealed class BotRandomizerPlugin : BasePlugin
         pawn = resolvedPawn;
         state = resolvedState;
         return true;
+    }
+
+    private bool TryResolveOwnedBotWeapon(
+        int slot,
+        int userId,
+        long generation,
+        uint weaponEntityHandle,
+        out SlotCosmeticState state,
+        out CBasePlayerWeapon weapon)
+    {
+        state = null!;
+        weapon = null!;
+        if (!TryResolveCurrentBot(
+                slot,
+                userId,
+                generation,
+                out var player,
+                out var pawn,
+                out var current)
+            || !player.PawnIsAlive)
+        {
+            return false;
+        }
+
+        var candidate = new CHandle<CBasePlayerWeapon>(weaponEntityHandle).Value;
+        if (candidate is not { IsValid: true } || !PawnOwnsWeapon(pawn, candidate))
+            return false;
+
+        state = current;
+        weapon = candidate;
+        return true;
+    }
+
+    private static bool PawnOwnsWeapon(CCSPlayerPawn pawn, CBasePlayerWeapon weapon)
+    {
+        var weapons = pawn.WeaponServices?.MyWeapons;
+        if (weapons is null)
+            return false;
+
+        foreach (var handle in weapons)
+        {
+            if (handle.Value is { IsValid: true } candidate && candidate.Handle == weapon.Handle)
+                return true;
+        }
+
+        return false;
     }
 
     private void OnOwnershipChanged(OwnershipChange change)

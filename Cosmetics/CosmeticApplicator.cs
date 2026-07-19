@@ -52,24 +52,38 @@ internal sealed class CosmeticApplicator
             if (item is null)
                 return;
 
-            item.AttributeList.Attributes.RemoveAll();
-            item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+            var attributeList = item.AttributeList;
+            var networkedAttributes = item.NetworkedDynamicAttributes;
+            if (attributeList.Handle == IntPtr.Zero || networkedAttributes.Handle == IntPtr.Zero)
+                return;
+
+            attributeList.Attributes.RemoveAll();
+            networkedAttributes.Attributes.RemoveAll();
             AssignItemId(item);
-            item.Initialized = true;
+            // Initialized is for an econ view supplied before GiveNamedItem constructs
+            // the entity; changing it on a live returned weapon is not lifecycle-safe.
 
             weapon.FallbackPaintKit = selection.PaintKit;
             weapon.FallbackSeed = selection.Seed;
             weapon.FallbackWear = selection.Wear;
-            SetTextureAttributes(item, selection.PaintKit, selection.Seed, selection.Wear);
+            SetTextureAttributes(
+                networkedAttributes,
+                attributeList,
+                selection.PaintKit,
+                selection.Seed,
+                selection.Wear);
 
             if (includeStickers)
             {
                 foreach (var sticker in selection.Stickers)
-                    SetStickerAttributes(item.NetworkedDynamicAttributes, sticker);
+                    SetStickerAttributes(networkedAttributes, sticker);
             }
 
             if (includeCharms && selection.Keychain is not null)
-                SetKeychainAttributes(item.NetworkedDynamicAttributes, selection.Keychain);
+            {
+                SetKeychainAttributes(networkedAttributes, selection.Keychain);
+                SetKeychainAttributes(attributeList, selection.Keychain);
+            }
 
             Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
             weapon.AcceptInput("SetBodygroup", value: $"body,{(selection.Legacy ? 1 : 0)}");
@@ -115,11 +129,15 @@ internal sealed class CosmeticApplicator
                     item.AttributeList.Attributes.RemoveAll();
                     item.NetworkedDynamicAttributes.Attributes.RemoveAll();
                     AssignItemId(item);
-                    item.Initialized = true;
                     weapon.FallbackPaintKit = selection.PaintKit;
                     weapon.FallbackSeed = 0;
                     weapon.FallbackWear = selection.Wear;
-                    SetTextureAttributes(item, selection.PaintKit, 0, selection.Wear);
+                    SetTextureAttributes(
+                        item.NetworkedDynamicAttributes,
+                        item.AttributeList,
+                        selection.PaintKit,
+                        0,
+                        selection.Wear);
                 }
                 Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
                 return;
@@ -143,7 +161,12 @@ internal sealed class CosmeticApplicator
             item.AttributeList.Attributes.RemoveAll();
             item.ItemDefinitionIndex = selection.DefIndex;
             AssignItemId(item);
-            SetTextureAttributes(item, selection.PaintKit, 0, selection.Wear);
+            SetTextureAttributes(
+                item.NetworkedDynamicAttributes,
+                item.AttributeList,
+                selection.PaintKit,
+                0,
+                selection.Wear);
             item.Initialized = true;
             pawn.AcceptInput("SetBodygroup", value: "first_or_third_person,0");
         }
@@ -196,14 +219,19 @@ internal sealed class CosmeticApplicator
         }
     }
 
-    private void SetTextureAttributes(CEconItemView item, int paintKit, int seed, float wear)
+    private void SetTextureAttributes(
+        CAttributeList networkedAttributes,
+        CAttributeList attributeList,
+        int paintKit,
+        int seed,
+        float wear)
     {
-        SetAttribute(item.NetworkedDynamicAttributes, "set item texture prefab", paintKit);
-        SetAttribute(item.NetworkedDynamicAttributes, "set item texture seed", seed);
-        SetAttribute(item.NetworkedDynamicAttributes, "set item texture wear", wear);
-        SetAttribute(item.AttributeList, "set item texture prefab", paintKit);
-        SetAttribute(item.AttributeList, "set item texture seed", seed);
-        SetAttribute(item.AttributeList, "set item texture wear", wear);
+        SetAttribute(networkedAttributes, "set item texture prefab", paintKit);
+        SetAttribute(networkedAttributes, "set item texture seed", seed);
+        SetAttribute(networkedAttributes, "set item texture wear", wear);
+        SetAttribute(attributeList, "set item texture prefab", paintKit);
+        SetAttribute(attributeList, "set item texture seed", seed);
+        SetAttribute(attributeList, "set item texture wear", wear);
     }
 
     private void SetStickerAttributes(CAttributeList attributes, StickerSelection sticker)
@@ -236,7 +264,10 @@ internal sealed class CosmeticApplicator
     }
 
     private void SetAttribute(CAttributeList attributes, string name, float value)
-        => _setAttributeByName?.Invoke(attributes.Handle, name, value);
+    {
+        if (_setAttributeByName is not null && attributes.Handle != IntPtr.Zero)
+            _setAttributeByName.Invoke(attributes.Handle, name, value);
+    }
 
     private void AssignItemId(CEconItemView item)
     {

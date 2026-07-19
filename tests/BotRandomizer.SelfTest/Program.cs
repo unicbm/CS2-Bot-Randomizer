@@ -13,6 +13,11 @@ Assert(catalog.Gloves.Count == 94, "glove count");
 Assert(catalog.StickerKits.Count == 10565, "sticker count");
 Assert(catalog.KeychainDefinitions.Count == 81, "keychain count");
 Assert(catalog.MusicKits.Count == 98, "music kit count");
+foreach (var defIndex in new ushort[] { 16, 23, 26, 60 })
+{
+    Assert(catalog.TryGetWeapon(defIndex, out var weapon) && weapon.Paints.Count > 0,
+        $"BotBuy CT replacement weapon {defIndex}");
+}
 
 Assert(BitConverter.SingleToInt32Bits(AttributeEncoding.UInt32BitsToSingle(0xDEADBEEF))
     == unchecked((int)0xDEADBEEF), "uint attribute bit encoding");

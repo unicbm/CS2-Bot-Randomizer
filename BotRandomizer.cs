@@ -16,6 +16,9 @@ namespace BotRandomizer;
 
 public sealed class BotRandomizerPlugin : BasePlugin
 {
+    private const int WeaponApplyRetryCount = 2;
+    private const float WeaponApplyRetryDelay = 0.05f;
+
     private static readonly PluginCapability<IBotCosmeticOwnershipApi> OwnershipCapability =
         new(BotRandomizerApiContract.CapabilityName);
 
@@ -29,7 +32,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private bool _giveNamedItemHooked;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.3.1";
+    public override string ModuleVersion => "1.3.2";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -181,26 +184,21 @@ public sealed class BotRandomizerPlugin : BasePlugin
             var weaponEntityHandle = weapon.EntityHandle.Raw;
             if (weaponEntityHandle == Utilities.InvalidEHandleIndex)
                 return HookResult.Continue;
+            if (weapon.DesignerName.Contains("knife", StringComparison.Ordinal)
+                || weapon.DesignerName == "weapon_bayonet")
+            {
+                return HookResult.Continue;
+            }
 
             var slot = state.Slot;
             var userId = state.UserId;
             var generation = state.Generation;
-            Server.NextFrame(() =>
-            {
-                if (!TryResolveOwnedBotWeapon(
-                        slot,
-                        userId,
-                        generation,
-                        weaponEntityHandle,
-                        out var current,
-                        out var currentWeapon)
-                    || !_ownership.CanWrite(slot, CosmeticScope.Weapons))
-                {
-                    return;
-                }
-
-                ApplyRandomWeapon(current, currentWeapon);
-            });
+            Server.NextFrame(() => TryApplyGivenWeapon(
+                slot,
+                userId,
+                generation,
+                weaponEntityHandle,
+                WeaponApplyRetryCount));
         }
         catch (Exception exception)
         {
@@ -365,25 +363,68 @@ public sealed class BotRandomizerPlugin : BasePlugin
         }
     }
 
-    private void ApplyRandomWeapon(SlotCosmeticState state, CBasePlayerWeapon weapon)
+    private WeaponApplyResult ApplyRandomWeapon(SlotCosmeticState state, CBasePlayerWeapon weapon)
     {
         if (_roller is null || _applicator is null || !weapon.IsValid)
-            return;
+            return WeaponApplyResult.Pending;
         if (weapon.DesignerName.Contains("knife", StringComparison.Ordinal)
             || weapon.DesignerName == "weapon_bayonet")
         {
-            return;
+            return WeaponApplyResult.Unsupported;
         }
 
         var defIndex = weapon.AttributeManager?.Item?.ItemDefinitionIndex ?? 0;
         if (defIndex == 0)
-            return;
+            return WeaponApplyResult.Pending;
 
         var selection = _roller.GetOrCreateWeapon(state.Loadout, defIndex);
         if (selection is null)
+            return WeaponApplyResult.Unsupported;
+
+        return _applicator.ApplyWeapon(weapon, selection, _options.Stickers, _options.Charms)
+            ? WeaponApplyResult.Applied
+            : WeaponApplyResult.Pending;
+    }
+
+    private void TryApplyGivenWeapon(
+        int slot,
+        int userId,
+        long generation,
+        uint weaponEntityHandle,
+        int retriesRemaining)
+    {
+        if (!_options.Enabled
+            || !_options.Weapons
+            || !_states.IsCurrent(slot, userId, generation)
+            || !_ownership.CanWrite(slot, CosmeticScope.Weapons))
+        {
+            return;
+        }
+
+        if (TryResolveOwnedBotWeapon(
+                slot,
+                userId,
+                generation,
+                weaponEntityHandle,
+                out var state,
+                out var weapon))
+        {
+            var result = ApplyRandomWeapon(state, weapon);
+            if (result is WeaponApplyResult.Applied or WeaponApplyResult.Unsupported)
+                return;
+        }
+
+        if (retriesRemaining <= 0)
             return;
 
-        _applicator.ApplyWeapon(weapon, selection, _options.Stickers, _options.Charms);
+        AddTimer(
+            WeaponApplyRetryDelay,
+            () => TryApplyGivenWeapon(
+                slot,
+                userId,
+                generation,
+                weaponEntityHandle,
+                retriesRemaining - 1));
     }
 
     private void ApplyAllWeapons(CCSPlayerPawn pawn, SlotCosmeticState state)
@@ -753,5 +794,12 @@ public sealed class BotRandomizerPlugin : BasePlugin
         Utilities.SetStateChanged(player, "CCSPlayerController", "m_iMusicKitMVPs");
         player.MvpNoMusic = false;
         Utilities.SetStateChanged(player, "CCSPlayerController", "m_bMvpNoMusic");
+    }
+
+    private enum WeaponApplyResult
+    {
+        Applied,
+        Pending,
+        Unsupported
     }
 }

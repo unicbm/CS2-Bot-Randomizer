@@ -37,25 +37,25 @@ internal sealed class CosmeticApplicator
         Utilities.SetStateChanged(pawn, "CBaseModelEntity", "m_clrRender");
     }
 
-    internal void ApplyWeapon(
+    internal bool ApplyWeapon(
         CBasePlayerWeapon weapon,
         WeaponCosmeticSelection selection,
         bool includeStickers,
         bool includeCharms)
     {
         if (_setAttributeByName is null || !weapon.IsValid)
-            return;
+            return false;
 
         try
         {
             var item = weapon.AttributeManager?.Item;
             if (item is null)
-                return;
+                return false;
 
             var attributeList = item.AttributeList;
             var networkedAttributes = item.NetworkedDynamicAttributes;
             if (attributeList.Handle == IntPtr.Zero || networkedAttributes.Handle == IntPtr.Zero)
-                return;
+                return false;
 
             attributeList.Attributes.RemoveAll();
             networkedAttributes.Attributes.RemoveAll();
@@ -87,14 +87,16 @@ internal sealed class CosmeticApplicator
 
             Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
             weapon.AcceptInput("SetBodygroup", value: $"body,{(selection.Legacy ? 1 : 0)}");
+            return true;
         }
         catch (Exception exception)
         {
-            if (_weaponErrorLogged)
-                return;
-
-            _weaponErrorLogged = true;
-            _logger.LogError(exception, "[BotRandomizer] Failed to apply weapon cosmetics");
+            if (!_weaponErrorLogged)
+            {
+                _weaponErrorLogged = true;
+                _logger.LogError(exception, "[BotRandomizer] Failed to apply weapon cosmetics");
+            }
+            return false;
         }
     }
 

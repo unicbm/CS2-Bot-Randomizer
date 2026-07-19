@@ -16,9 +16,6 @@ namespace BotRandomizer;
 
 public sealed class BotRandomizerPlugin : BasePlugin
 {
-    private const int WeaponApplyRetryCount = 2;
-    private const float WeaponApplyRetryDelay = 0.05f;
-
     private static readonly PluginCapability<IBotCosmeticOwnershipApi> OwnershipCapability =
         new(BotRandomizerApiContract.CapabilityName);
 
@@ -29,10 +26,9 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private CosmeticCatalog? _catalog;
     private CosmeticRoller? _roller;
     private CosmeticApplicator? _applicator;
-    private bool _giveNamedItemHooked;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.3.2";
+    public override string ModuleVersion => "1.3.3";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -53,14 +49,12 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterListener<Listeners.OnClientDisconnect>(OnClientDisconnect);
+        RegisterListener<Listeners.OnEntitySpawned>(OnEntitySpawned);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventRoundMvp>(OnRoundMvp, HookMode.Pre);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventItemPickup>(OnItemPickup);
         AddTimer(1.0f, _ownership.CleanupExpired, TimerFlags.REPEAT);
-
-        VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPost, HookMode.Post);
-        _giveNamedItemHooked = true;
 
         if (hotReload)
             RestoreAllBots(CosmeticScope.All);
@@ -68,12 +62,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     public override void Unload(bool hotReload)
     {
-        if (_giveNamedItemHooked)
-        {
-            VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPost, HookMode.Post);
-            _giveNamedItemHooked = false;
-        }
-
         _ownership.Changed -= OnOwnershipChanged;
         OwnershipApiRegistry.ClearCurrent(_ownership);
         _ownership.Dispose();
@@ -161,51 +149,28 @@ public sealed class BotRandomizerPlugin : BasePlugin
         return HookResult.Continue;
     }
 
-    private HookResult OnGiveNamedItemPost(DynamicHook hook)
+    private void OnEntitySpawned(CEntityInstance entity)
     {
         if (!_options.Enabled || !_options.Weapons || _applicator is null || _roller is null)
-            return HookResult.Continue;
+            return;
 
-        try
+        var name = entity.DesignerName;
+        if (string.IsNullOrWhiteSpace(name)
+            || !name.StartsWith("weapon_", StringComparison.Ordinal)
+            || name.Contains("knife", StringComparison.Ordinal)
+            || name == "weapon_bayonet")
         {
-            var itemServices = hook.GetParam<CCSPlayer_ItemServices>(0);
-            var weapon = hook.GetReturn<CBasePlayerWeapon>();
-            var player = GetPlayerFromItemServices(itemServices);
-            var state = GetOrCreateState(player);
-            if (weapon is not { IsValid: true }
-                || state is null
-                || !_ownership.CanWrite(state.Slot, CosmeticScope.Weapons))
-            {
-                return HookResult.Continue;
-            }
-
-            // The returned weapon is not guaranteed to be fully owned/initialized while
-            // GiveNamedItem's post hook is still on the native stack.
-            var weaponEntityHandle = weapon.EntityHandle.Raw;
-            if (weaponEntityHandle == Utilities.InvalidEHandleIndex)
-                return HookResult.Continue;
-            if (weapon.DesignerName.Contains("knife", StringComparison.Ordinal)
-                || weapon.DesignerName == "weapon_bayonet")
-            {
-                return HookResult.Continue;
-            }
-
-            var slot = state.Slot;
-            var userId = state.UserId;
-            var generation = state.Generation;
-            Server.NextFrame(() => TryApplyGivenWeapon(
-                slot,
-                userId,
-                generation,
-                weaponEntityHandle,
-                WeaponApplyRetryCount));
-        }
-        catch (Exception exception)
-        {
-            Logger.LogError(exception, "[BotRandomizer] GiveNamedItem post-hook failed");
+            return;
         }
 
-        return HookResult.Continue;
+        var weaponEntityHandle = entity.EntityHandle.Raw;
+        if (weaponEntityHandle == Utilities.InvalidEHandleIndex)
+            return;
+
+        // EntitySpawned identifies the engine's final entity. Resolve its owner from the
+        // pawn inventory on a later frame instead of writing through GiveNamedItem's
+        // transient return object while the native construction stack is still active.
+        Server.NextFrame(() => TryApplySpawnedWeapon(weaponEntityHandle, retryIfPending: true));
     }
 
     private HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
@@ -386,45 +351,40 @@ public sealed class BotRandomizerPlugin : BasePlugin
             : WeaponApplyResult.Pending;
     }
 
-    private void TryApplyGivenWeapon(
-        int slot,
-        int userId,
-        long generation,
-        uint weaponEntityHandle,
-        int retriesRemaining)
+    private void TryApplySpawnedWeapon(uint weaponEntityHandle, bool retryIfPending)
     {
-        if (!_options.Enabled
-            || !_options.Weapons
-            || !_states.IsCurrent(slot, userId, generation)
-            || !_ownership.CanWrite(slot, CosmeticScope.Weapons))
+        if (!_options.Enabled || !_options.Weapons || _applicator is null || _roller is null)
         {
             return;
         }
 
-        if (TryResolveOwnedBotWeapon(
-                slot,
-                userId,
-                generation,
-                weaponEntityHandle,
-                out var state,
-                out var weapon))
+        var weapon = new CHandle<CBasePlayerWeapon>(weaponEntityHandle).Value;
+        if (weapon is not { IsValid: true })
+            return;
+
+        foreach (var player in Utilities.GetPlayers())
         {
-            var result = ApplyRandomWeapon(state, weapon);
-            if (result is WeaponApplyResult.Applied or WeaponApplyResult.Unsupported)
+            if (player is not { IsValid: true, IsBot: true, IsHLTV: false, PawnIsAlive: true })
+                continue;
+
+            var pawn = player.PlayerPawn?.Value;
+            if (pawn is not { IsValid: true } || !PawnOwnsWeapon(pawn, weapon))
+                continue;
+
+            var state = GetOrCreateState(player);
+            if (state is null || !_ownership.CanWrite(state.Slot, CosmeticScope.Weapons))
                 return;
+
+            var result = ApplyRandomWeapon(state, weapon);
+            if (result == WeaponApplyResult.Pending && retryIfPending)
+                Server.NextFrame(() => TryApplySpawnedWeapon(weaponEntityHandle, retryIfPending: false));
+            return;
         }
 
-        if (retriesRemaining <= 0)
-            return;
-
-        AddTimer(
-            WeaponApplyRetryDelay,
-            () => TryApplyGivenWeapon(
-                slot,
-                userId,
-                generation,
-                weaponEntityHandle,
-                retriesRemaining - 1));
+        // Ownership can be published one frame after entity spawn. A single frame-bound
+        // retry follows that lifecycle transition without guessing a BotBuy timer delay.
+        if (retryIfPending)
+            Server.NextFrame(() => TryApplySpawnedWeapon(weaponEntityHandle, retryIfPending: false));
     }
 
     private void ApplyAllWeapons(CCSPlayerPawn pawn, SlotCosmeticState state)
@@ -507,37 +467,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
         player = resolved;
         pawn = resolvedPawn;
         state = resolvedState;
-        return true;
-    }
-
-    private bool TryResolveOwnedBotWeapon(
-        int slot,
-        int userId,
-        long generation,
-        uint weaponEntityHandle,
-        out SlotCosmeticState state,
-        out CBasePlayerWeapon weapon)
-    {
-        state = null!;
-        weapon = null!;
-        if (!TryResolveCurrentBot(
-                slot,
-                userId,
-                generation,
-                out var player,
-                out var pawn,
-                out var current)
-            || !player.PawnIsAlive)
-        {
-            return false;
-        }
-
-        var candidate = new CHandle<CBasePlayerWeapon>(weaponEntityHandle).Value;
-        if (candidate is not { IsValid: true } || !PawnOwnsWeapon(pawn, candidate))
-            return false;
-
-        state = current;
-        weapon = candidate;
         return true;
     }
 
@@ -740,16 +669,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
         foreach (var state in _states.States)
             _states.BumpGeneration(state.Slot);
         return scope;
-    }
-
-    private static CCSPlayerController? GetPlayerFromItemServices(CCSPlayer_ItemServices itemServices)
-    {
-        var pawn = itemServices.Pawn.Value;
-        if (pawn is not { IsValid: true } || pawn.Controller.Value is not { IsValid: true } controller)
-            return null;
-
-        var player = new CCSPlayerController(controller.Handle);
-        return player.IsValid ? player : null;
     }
 
     private static bool IsPlayableTeam(int team)

@@ -15,9 +15,10 @@ charm.
   required by CS2's `stored_as_integer` economic attributes.
 - Sticker combinations reserve distinct weapon wear values to avoid the CS2
   client material cache displaying another bot's stickers.
-- A bot owns one complete loadout. Delayed callbacks capture both its user ID
-  and loadout generation, so stale callbacks cannot write after a team change,
-  reroll, disconnect, slot reuse, or external ownership handoff.
+- A bot owns one complete loadout. Per-slot callbacks capture both its user ID
+  and loadout generation; newly spawned weapons are instead re-resolved from
+  their final owner's live pawn inventory. Stale callbacks cannot write after a
+  team change, reroll, disconnect, slot reuse, or external ownership handoff.
 - `BotRandomizer.API` exposes expiring per-slot, per-scope leases for replay or
   override plugins. Releasing a lease restores the frozen random baseline by
   default.
@@ -30,6 +31,9 @@ knife, or glove definition; it does not guess IDs from numeric ranges.
 
 - Each `(bot slot, weapon definition)` gets one stable weapon selection until a
   team change, map change, or explicit reroll.
+- Weapon entities are skinned only after `OnEntitySpawned` and a matching entry
+  in the owner's `pawn.WeaponServices.MyWeapons`; the plugin does not mutate the
+  transient return object inside the native `GiveNamedItem` hook.
 - A weapon receives `0..5` stickers. Sticker slots are contiguous and each
   schema index is constrained to the selected paint's actual HD/legacy model.
 - A weapon has a 50% chance to receive one charm in keychain slot `0`.

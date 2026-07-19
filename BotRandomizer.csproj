@@ -13,8 +13,17 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="BotRandomizer.API\BotRandomizer.API.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="BotRandomizer.API\**\*.cs" />
+    <Compile Remove="tests\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="gamedata\*.*" CopyToOutputDirectory="PreserveNewest" />
-    <None Update="skins_en.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="cosmetic_catalog.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1,27 +1,121 @@
 # CS2-Bot-Randomizer
-CS2-Bot-Randomizer is a plugin based on CounterStrikeSharp that allows each bot to have their own knife, gloves, weapon skins, agent model, music kit, and avatar.
-# Features
-1. Assigns each bot a knife, a pair of gloves, and a set of weapon skins
 
-2. Assigns each bot their own T/CT agent model and avatar
+CounterStrikeSharp plugin that gives each bot a stable cosmetic loadout: agent,
+music kit, knife, gloves, weapon paint, up to five stickers, and an optional
+charm.
 
-3. Allocates an MVP music kit to each bot
+## What changed in 1.3
 
-<img width="960" height="576" alt="Skins_1" src="https://github.com/user-attachments/assets/f096b9d6-5800-4942-baed-d1aa7d4461ec" />
+- Weapon paints, knife paints, gloves, stickers, charms, model-specific sticker
+  schemas, and wear ranges come from the bundled `cosmetic_catalog.json`.
+- The catalog is generated from [`ianlucas/cs2-lib`](https://github.com/ianlucas/cs2-lib),
+  records the exact source commit, is validated at plugin startup, and requires
+  no runtime network access.
+- Sticker and charm integer attributes are bit-reinterpreted as floats, as
+  required by CS2's `stored_as_integer` economic attributes.
+- Sticker combinations reserve distinct weapon wear values to avoid the CS2
+  client material cache displaying another bot's stickers.
+- A bot owns one complete loadout. Delayed callbacks capture both its user ID
+  and loadout generation, so stale callbacks cannot write after a team change,
+  reroll, disconnect, slot reuse, or external ownership handoff.
+- `BotRandomizer.API` exposes expiring per-slot, per-scope leases for replay or
+  override plugins. Releasing a lease restores the frozen random baseline by
+  default.
 
-![pic2](https://github.com/user-attachments/assets/f45ee14b-e994-4037-8ac8-caf36f8056a3)
-![random_2](https://github.com/user-attachments/assets/e13ab9b5-1abc-4f1e-9b11-178c4dd3f420)
+The plugin deliberately keeps the original, verified four-knife subclass set.
+The larger catalog is used to select only paints valid for the selected weapon,
+knife, or glove definition; it does not guess IDs from numeric ranges.
 
-# Installation
-1. Download the latest **BotRandomizer.zip** from [Releases](https://github.com/ed0ard/CS2-Bot-Randomizer/releases)
+## Runtime behavior
 
-2. Decompress it and upload the folder to `game/csgo/addons/counterstrikesharp/plugins` on your server
+- Each `(bot slot, weapon definition)` gets one stable weapon selection until a
+  team change, map change, or explicit reroll.
+- A weapon receives `0..5` stickers. Sticker slots are contiguous and each
+  schema index is constrained to the selected paint's actual HD/legacy model.
+- A weapon has a 50% chance to receive one charm in keychain slot `0`.
+- Charm seeds stay in CS2's valid `1..100000` range.
+- Sticker Slab (keychain definition `37`) also receives a real sticker kit ID.
+- Economic attributes are cleared and rebuilt atomically from the cached
+  selection, then `m_AttributeManager` is marked changed.
 
-3. Navigate to `addons/counterstrikesharp/configs/core.json` and set `FollowCS2ServerGuidelines` to `false`
+## Commands
 
-3. Restart your server
+```text
+br_status
+br_set <enabled|weapons|knives|gloves|agents|music|stickers|charms> <on|off>
+br_reroll [all|slot]
+br_ownership
+```
 
-# Credits
-[cs2-WeaponPaints](https://github.com/Nereziel/cs2-WeaponPaints)
+Changing settings, rerolling, and viewing ownership require `@css/cvar`.
+`br_status` is read-only.
 
-## If you find the project useful then please take the time to star⭐ the repository
+## Optional ownership API
+
+The capability name is:
+
+```text
+botrandomizer:cosmetic_ownership:v1
+```
+
+Consumers compile against `BotRandomizer.API.dll` and acquire a short-lived
+lease for the exact bot slot and scopes they will write. Active replay code
+must renew the lease; expired leases are reclaimed automatically. Consumers
+should release with `RestoreBaseline` during normal stop/handoff and unload.
+
+For CounterStrikeSharp shared-type identity, install the contract assembly at:
+
+```text
+addons/counterstrikesharp/shared/BotRandomizer.API/BotRandomizer.API.dll
+```
+
+Do not ship private, differing copies of the contract assembly in multiple
+plugin directories.
+
+## Build and validate
+
+```powershell
+C:\Users\Uni\.dotnet\dotnet.exe build -c Release
+C:\Users\Uni\.dotnet\dotnet.exe run `
+  --project tests\BotRandomizer.SelfTest\BotRandomizer.SelfTest.csproj `
+  -c Release -- cosmetic_catalog.json
+```
+
+The self-test validates catalog counts and provenance, integer attribute bit
+encoding, sticker schema bounds, Sticker Slab payloads, keychain seed bounds,
+wear-cache isolation, and ownership lease expiry.
+
+## Refresh the catalog
+
+Clone a reviewed `ianlucas/cs2-lib` revision, then run:
+
+```powershell
+node tools\generate-cosmetic-catalog.mjs `
+  C:\path\to\cs2-lib\src\items.ts `
+  cosmetic_catalog.json `
+  <full-40-character-cs2-lib-commit>
+```
+
+Review the generated diff and run the self-test before publishing. The plugin
+never downloads or mutates the catalog at runtime.
+
+## Installation
+
+1. Build or download the release.
+2. Place `BotRandomizer.dll` and `cosmetic_catalog.json` under
+   `addons/counterstrikesharp/plugins/BotRandomizer/`.
+3. Place `BotRandomizer.API.dll` in the shared path shown above.
+4. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
+   `configs/core.json`.
+5. Restart the server and check `br_status` before enabling another cosmetic
+   writer.
+
+## Credits and licensing
+
+- Original plugin: [ed0ard/CS2-Bot-Randomizer](https://github.com/ed0ard/CS2-Bot-Randomizer)
+- Catalog and inventory model: [ianlucas/cs2-lib](https://github.com/ianlucas/cs2-lib)
+- Attribute encoding and cache workaround:
+  [ianlucas/cs2-css-inventory-simulator](https://github.com/ianlucas/cs2-css-inventory-simulator)
+
+See `THIRD_PARTY_NOTICES.md` for the MIT notice covering the adapted Ian Lucas
+work. This repository remains licensed under AGPL-3.0.

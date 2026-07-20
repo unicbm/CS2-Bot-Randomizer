@@ -93,16 +93,14 @@ public sealed class BotRandomizerPlugin : BasePlugin
             var charmPlacements = CharmPlacementCatalog.Load(placementPath, _catalog);
             _roller = new CosmeticRoller(_catalog, charmPlacements);
             Logger.LogInformation(
-                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms; {CharmPositions} observed positions for {CharmWeapons} weapons from {CharmDemos} contributing demos ({CharmDemosParsed} parsed)",
+                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms; {CharmPositions} charm positions for {CharmWeapons} weapons",
                 _catalog.SourceCommit[..12],
                 _catalog.WeaponCount,
                 _catalog.WeaponPaintCount,
                 _catalog.StickerKits.Count,
                 _catalog.KeychainDefinitions.Count,
                 charmPlacements.PlacementCount,
-                charmPlacements.WeaponCount,
-                charmPlacements.ContributingDemoCount,
-                charmPlacements.SourceDemoCount);
+                charmPlacements.WeaponCount);
         }
         catch (Exception exception)
         {

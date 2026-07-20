@@ -137,7 +137,9 @@ To rebuild weapon-coupled charm positions from one or more reviewed
 
 The generator deduplicates inventory observations before grouping exact
 float32 positions by weapon definition. It never transfers a position between
-different weapon models.
+different weapon models. The published runtime file contains only weapon
+definition keys and `[x, y, z]` arrays; parser details, demo hashes, and
+observation counts remain in the input evidence reports.
 
 ## Installation
 

@@ -12,13 +12,11 @@ $ErrorActionPreference = 'Stop'
 
 $cosmetics = Get-Content -Raw -LiteralPath $CosmeticCatalogPath | ConvertFrom-Json
 
-$parsedDemoCount = 0
 $allPlacements = foreach ($path in $EvidencePath) {
     $evidence = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
     if ($evidence.demos_parsed -le 0 -or $evidence.failures.Count -ne 0 -or $evidence.placements.Count -eq 0) {
         throw "Evidence report '$path' must contain successful demo parses and no failures."
     }
-    $parsedDemoCount += [int] $evidence.demos_parsed
     $evidence.placements
 }
 
@@ -27,20 +25,20 @@ $placements = $allPlacements | Group-Object {
         $_.demo_sha256, $_.steam_id, $_.weapon_def_index, $_.charm_id, `
         [single] $_.offset_x, [single] $_.offset_y, [single] $_.offset_z
 } | ForEach-Object { $_.Group[0] }
-$demoHashes = @($placements.demo_sha256 | Sort-Object -Unique)
 
-$weaponsByDefIndex = @{}
+$knownWeaponDefIndexes = [System.Collections.Generic.HashSet[int]]::new()
 foreach ($weapon in $cosmetics.weapons) {
-    $weaponsByDefIndex[[int] $weapon.defIndex] = [string] $weapon.designerName
+    [void] $knownWeaponDefIndexes.Add([int] $weapon.defIndex)
 }
 
-$weaponDocuments = foreach ($weaponGroup in ($placements | Group-Object weapon_def_index | Sort-Object { [int] $_.Name })) {
+$document = [ordered] @{}
+foreach ($weaponGroup in ($placements | Group-Object weapon_def_index | Sort-Object { [int] $_.Name })) {
     $defIndex = [int] $weaponGroup.Name
-    if (-not $weaponsByDefIndex.ContainsKey($defIndex)) {
+    if (-not $knownWeaponDefIndexes.Contains($defIndex)) {
         throw "Evidence contains unknown weapon definition $defIndex."
     }
 
-    $positionDocuments = foreach ($positionGroup in ($weaponGroup.Group | Group-Object {
+    $positions = foreach ($positionGroup in ($weaponGroup.Group | Group-Object {
         '{0:R}|{1:R}|{2:R}' -f [single] $_.offset_x, [single] $_.offset_y, [single] $_.offset_z
     })) {
         $first = $positionGroup.Group[0]
@@ -48,30 +46,18 @@ $weaponDocuments = foreach ($weaponGroup in ($placements | Group-Object weapon_d
             x = [single] $first.offset_x
             y = [single] $first.offset_y
             z = [single] $first.offset_z
-            observations = $positionGroup.Count
-            demoCount = @($positionGroup.Group.demo_sha256 | Sort-Object -Unique).Count
         }
     }
 
-    [pscustomobject] [ordered] @{
-        defIndex = $defIndex
-        designerName = $weaponsByDefIndex[$defIndex]
-        placements = @($positionDocuments | Sort-Object x, y, z)
+    $vectors = [System.Collections.Generic.List[object]]::new()
+    foreach ($position in ($positions | Sort-Object x, y, z)) {
+        $vectors.Add([object[]] @($position.x, $position.y, $position.z))
     }
+
+    $document[[string] $defIndex] = $vectors.ToArray()
 }
 
-$document = [ordered] @{
-    schemaVersion = 1
-    source = [ordered] @{
-        kind = 'demo-observed'
-        parser = 'cs2-demo-botmimic/cs2-demotracer'
-        demosParsed = $parsedDemoCount
-        demoSha256 = $demoHashes
-    }
-    weapons = @($weaponDocuments)
-}
-
-$json = $document | ConvertTo-Json -Depth 8
+$json = $document | ConvertTo-Json -Depth 5
 [System.IO.File]::WriteAllText(
     [System.IO.Path]::GetFullPath($OutputPath),
     $json + [Environment]::NewLine,

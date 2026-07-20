@@ -18,8 +18,6 @@ Assert(catalog.Gloves.Count == 94, "glove count");
 Assert(catalog.StickerKits.Count == 10565, "sticker count");
 Assert(catalog.KeychainDefinitions.Count == 81, "keychain count");
 Assert(catalog.MusicKits.Count == 98, "music kit count");
-Assert(charmPlacements.SourceDemoCount == 20, "charm placement parsed demo count");
-Assert(charmPlacements.ContributingDemoCount == 19, "charm placement contributing demo count");
 Assert(charmPlacements.WeaponCount == 16, "charm placement weapon count");
 Assert(charmPlacements.PlacementCount == 158, "charm placement count");
 Assert(charmPlacements.TryGetPlacements(7, out var akPlacements) && akPlacements.Count == 36,

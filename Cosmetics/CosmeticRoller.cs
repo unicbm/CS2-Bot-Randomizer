@@ -6,14 +6,21 @@ internal sealed class CosmeticRoller
     private const int StickerSlabDefinition = 37;
     private const int MinimumKeychainSeed = 1;
     private const int MaximumKeychainSeed = 100000;
+    private const int KeychainChanceNumerator = 7;
+    private const int KeychainChanceDenominator = 10;
 
     private readonly Random _random;
     private readonly CosmeticCatalog _catalog;
+    private readonly CharmPlacementCatalog _charmPlacements;
     private readonly WeaponWearAllocator _wearAllocator = new();
 
-    internal CosmeticRoller(CosmeticCatalog catalog, Random? random = null)
+    internal CosmeticRoller(
+        CosmeticCatalog catalog,
+        CharmPlacementCatalog charmPlacements,
+        Random? random = null)
     {
         _catalog = catalog;
+        _charmPlacements = charmPlacements;
         _random = random ?? new Random();
     }
 
@@ -56,7 +63,7 @@ internal sealed class CosmeticRoller
         var stickers = RollStickers(paint.Legacy
             ? weapon.LegacyStickerSchemaCount
             : weapon.StickerSchemaCount);
-        var keychain = RollKeychain();
+        var keychain = RollKeychain(defIndex);
         var wear = _wearAllocator.Reserve(defIndex, paint, stickers);
         var selection = new WeaponCosmeticSelection(
             paint.PaintKit,
@@ -88,19 +95,26 @@ internal sealed class CosmeticRoller
         return stickers;
     }
 
-    private KeychainSelection? RollKeychain()
+    private KeychainSelection? RollKeychain(ushort weaponDefIndex)
     {
-        if (_catalog.KeychainDefinitions.Count == 0 || _random.Next(2) == 0)
+        if (_catalog.KeychainDefinitions.Count == 0
+            || _random.Next(KeychainChanceDenominator) >= KeychainChanceNumerator)
             return null;
 
         var definition = Pick(_catalog.KeychainDefinitions);
         var sticker = definition == StickerSlabDefinition
             ? Pick(_catalog.StickerKits)
             : (uint?)null;
+        var placement = _charmPlacements.TryGetPlacements(weaponDefIndex, out var placements)
+            ? Pick(placements)
+            : (CharmPlacement?)null;
         return new KeychainSelection(
             definition,
             _random.Next(MinimumKeychainSeed, MaximumKeychainSeed + 1),
-            Sticker: sticker);
+            Sticker: sticker,
+            X: placement?.X,
+            Y: placement?.Y,
+            Z: placement?.Z);
     }
 
     private T Pick<T>(IReadOnlyList<T> values)

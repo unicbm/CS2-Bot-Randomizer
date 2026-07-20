@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <None Update="gamedata\*.*" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="charm_placements.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="cosmetic_catalog.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

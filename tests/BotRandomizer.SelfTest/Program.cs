@@ -5,6 +5,11 @@ if (args.Length != 1)
     throw new InvalidOperationException("Pass the absolute path to cosmetic_catalog.json.");
 
 var catalog = CosmeticCatalog.Load(args[0]);
+var placementPath = Path.Combine(
+    Path.GetDirectoryName(Path.GetFullPath(args[0]))
+        ?? throw new InvalidOperationException("Catalog path has no directory."),
+    "charm_placements.json");
+var charmPlacements = CharmPlacementCatalog.Load(placementPath, catalog);
 Assert(catalog.SourceRepository == "ianlucas/cs2-lib", "catalog source");
 Assert(catalog.WeaponCount == 35, "weapon count");
 Assert(catalog.WeaponPaintCount == 1456, "weapon paint count");
@@ -13,6 +18,12 @@ Assert(catalog.Gloves.Count == 94, "glove count");
 Assert(catalog.StickerKits.Count == 10565, "sticker count");
 Assert(catalog.KeychainDefinitions.Count == 81, "keychain count");
 Assert(catalog.MusicKits.Count == 98, "music kit count");
+Assert(charmPlacements.SourceDemoCount == 20, "charm placement parsed demo count");
+Assert(charmPlacements.ContributingDemoCount == 19, "charm placement contributing demo count");
+Assert(charmPlacements.WeaponCount == 16, "charm placement weapon count");
+Assert(charmPlacements.PlacementCount == 158, "charm placement count");
+Assert(charmPlacements.TryGetPlacements(7, out var akPlacements) && akPlacements.Count == 36,
+    "AK-47 charm placement pool");
 foreach (var defIndex in new ushort[] { 16, 23, 26, 60 })
 {
     Assert(catalog.TryGetWeapon(defIndex, out var weapon) && weapon.Paints.Count > 0,
@@ -49,7 +60,7 @@ var secondWear = wearAllocator.Reserve(7, paint, secondStickers);
 Assert(firstWear == repeatedWear, "identical sticker signatures reuse wear");
 Assert(firstWear != secondWear, "different sticker signatures reserve unique wear");
 
-var roller = new CosmeticRoller(catalog, new Random(1979));
+var roller = new CosmeticRoller(catalog, charmPlacements, new Random(1979));
 var allWeaponsLoadout = roller.RollLoadout(RandomizerAssets.TerroristTeam);
 foreach (var weaponEntry in catalog.Weapons)
 {
@@ -88,6 +99,11 @@ for (var iteration = 0; iteration < 250; iteration++)
         Assert(catalog.KeychainDefinitions.Contains(keychain.DefIndex), "keychain catalog membership");
         Assert(keychain.DefIndex == 37 ? keychain.Sticker is not null : keychain.Sticker is null,
             "Sticker Slab payload");
+        Assert(keychain.X is float x
+            && keychain.Y is float y
+            && keychain.Z is float z
+            && akPlacements.Contains(new CharmPlacement(x, y, z)),
+            "weapon-specific charm placement");
         sawKeychain = true;
         sawStickerSlab |= keychain.DefIndex == 37;
     }
@@ -95,6 +111,36 @@ for (var iteration = 0; iteration < 250; iteration++)
 Assert(sawStickers, "sticker rolling exercised");
 Assert(sawKeychain, "keychain rolling exercised");
 Assert(sawStickerSlab, "Sticker Slab rolling exercised");
+
+var charmRoller = new CosmeticRoller(catalog, charmPlacements, new Random(20260720));
+var charmCount = 0;
+const int charmTrials = 10000;
+for (var iteration = 0; iteration < charmTrials; iteration++)
+{
+    var loadout = charmRoller.RollLoadout(RandomizerAssets.TerroristTeam);
+    var weapon = charmRoller.GetOrCreateWeapon(loadout, 7)
+        ?? throw new InvalidOperationException("AK-47 probability roll missing.");
+    if (weapon.Keychain is not null)
+        charmCount++;
+}
+Assert(charmCount is >= 6800 and <= 7200, "70% keychain probability");
+
+var defaultPlacementRoller = new CosmeticRoller(catalog, charmPlacements, new Random(20260721));
+var sawDefaultPlacementCharm = false;
+for (var iteration = 0; iteration < 100; iteration++)
+{
+    var loadout = defaultPlacementRoller.RollLoadout(RandomizerAssets.CounterTerroristTeam);
+    var weapon = defaultPlacementRoller.GetOrCreateWeapon(loadout, 23)
+        ?? throw new InvalidOperationException("MP5-SD default placement roll missing.");
+    if (weapon.Keychain is not { } keychain)
+        continue;
+
+    Assert(keychain.X is null && keychain.Y is null && keychain.Z is null,
+        "unobserved weapon preserves CS2 default charm placement");
+    sawDefaultPlacementCharm = true;
+    break;
+}
+Assert(sawDefaultPlacementCharm, "unobserved weapon charm rolling exercised");
 
 var now = new DateTimeOffset(2026, 7, 19, 0, 0, 0, TimeSpan.Zero);
 using var ownership = new CosmeticOwnershipService(() => now);

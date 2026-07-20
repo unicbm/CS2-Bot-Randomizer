@@ -31,7 +31,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private bool _giveNamedItemErrorLogged;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.4.0";
+    public override string ModuleVersion => "1.4.1";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -87,22 +87,30 @@ public sealed class BotRandomizerPlugin : BasePlugin
     {
         try
         {
-            var path = Path.Combine(ModuleDirectory, "cosmetic_catalog.json");
-            _catalog = CosmeticCatalog.Load(path);
-            _roller = new CosmeticRoller(_catalog);
+            var catalogPath = Path.Combine(ModuleDirectory, "cosmetic_catalog.json");
+            var placementPath = Path.Combine(ModuleDirectory, "charm_placements.json");
+            _catalog = CosmeticCatalog.Load(catalogPath);
+            var charmPlacements = CharmPlacementCatalog.Load(placementPath, _catalog);
+            _roller = new CosmeticRoller(_catalog, charmPlacements);
             Logger.LogInformation(
-                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms",
+                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms; {CharmPositions} observed positions for {CharmWeapons} weapons from {CharmDemos} contributing demos ({CharmDemosParsed} parsed)",
                 _catalog.SourceCommit[..12],
                 _catalog.WeaponCount,
                 _catalog.WeaponPaintCount,
                 _catalog.StickerKits.Count,
-                _catalog.KeychainDefinitions.Count);
+                _catalog.KeychainDefinitions.Count,
+                charmPlacements.PlacementCount,
+                charmPlacements.WeaponCount,
+                charmPlacements.ContributingDemoCount,
+                charmPlacements.SourceDemoCount);
         }
         catch (Exception exception)
         {
             _catalog = null;
             _roller = null;
-            Logger.LogError(exception, "[BotRandomizer] cosmetic_catalog.json is invalid; randomization disabled");
+            Logger.LogError(
+                exception,
+                "[BotRandomizer] cosmetic_catalog.json or charm_placements.json is invalid; randomization disabled");
         }
     }
 

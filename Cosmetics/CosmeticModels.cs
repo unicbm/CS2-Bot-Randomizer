@@ -33,6 +33,8 @@ internal sealed record StickerSelection(
     float? X = null,
     float? Y = null);
 
+internal readonly record struct CharmPlacement(float X, float Y, float Z);
+
 internal sealed record KeychainSelection(
     uint DefIndex,
     int Seed,

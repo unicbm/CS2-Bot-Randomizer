@@ -8,6 +8,12 @@ charm.
 
 - Weapon paints, knife paints, gloves, stickers, charms, model-specific sticker
   schemas, and wear ranges come from the bundled `cosmetic_catalog.json`.
+- Charm offsets come from the bundled `charm_placements.json`. Its positions
+  were observed in parsed CS2 demos and are grouped by the weapon definition;
+  positions are never shared between different weapon models.
+- The current placement pool contains 158 distinct positions for 16 weapons,
+  built from 20 parsed demos (19 contained charm observations), including 12
+  current-version FACEIT demos.
 - The catalog is generated from [`ianlucas/cs2-lib`](https://github.com/ianlucas/cs2-lib),
   records the exact source commit, is validated at plugin startup, and requires
   no runtime network access.
@@ -46,7 +52,11 @@ knife, or glove definition; it does not guess IDs from numeric ranges.
   is cleared or rewritten afterward.
 - A weapon receives `0..5` stickers. Sticker slots are contiguous and each
   schema index is constrained to the selected paint's actual HD/legacy model.
-- A weapon has a 50% chance to receive one charm in keychain slot `0`.
+- A weapon has a 70% chance to receive one charm in keychain slot `0`.
+- For a weapon covered by `charm_placements.json`, the charm receives one
+  uniformly selected, demo-observed position for that exact weapon definition.
+  Weapons without observations omit custom offsets and retain CS2's own
+  weapon-aware default attachment position.
 - Charm seeds stay in CS2's valid `1..100000` range.
 - Sticker Slab (keychain definition `37`) also receives a real sticker kit ID.
 - Weapon setting changes and rerolls affect the next weapon constructed for
@@ -98,8 +108,9 @@ C:\Users\Uni\.dotnet\dotnet.exe run `
 The self-test validates catalog counts and provenance, exact designer-name to
 definition-index mappings (including BotBuy's CT replacement guns), integer
 attribute bit encoding, process-unique custom item IDs, sticker schema bounds,
-Sticker Slab payloads, keychain seed bounds, wear-cache isolation, and
-ownership lease expiry.
+Sticker Slab payloads, keychain seed bounds, demo-observed weapon-specific
+charm placement, 70% charm probability, wear-cache isolation, and ownership
+lease expiry.
 
 ## Refresh the catalog
 
@@ -115,10 +126,24 @@ node tools\generate-cosmetic-catalog.mjs `
 Review the generated diff and run the self-test before publishing. The plugin
 never downloads or mutates the catalog at runtime.
 
+To rebuild weapon-coupled charm positions from one or more reviewed
+`cs2-demotracer` evidence reports:
+
+```powershell
+.\tools\generate-charm-placement-catalog.ps1 `
+  -EvidencePath C:\path\to\evidence-a.json,C:\path\to\evidence-b.json `
+  -OutputPath .\charm_placements.json
+```
+
+The generator deduplicates inventory observations before grouping exact
+float32 positions by weapon definition. It never transfers a position between
+different weapon models.
+
 ## Installation
 
 1. Build or download the release.
-2. Place `BotRandomizer.dll` and `cosmetic_catalog.json` under
+2. Place `BotRandomizer.dll`, `cosmetic_catalog.json`, and
+   `charm_placements.json` under
    `addons/counterstrikesharp/plugins/BotRandomizer/`.
 3. Place `BotRandomizer.API.dll` in the shared path shown above.
 4. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's

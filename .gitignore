@@ -2,3 +2,8 @@ bin/
 obj/
 .vs/
 *.user
+Panel/node_modules/
+Panel/dist/
+Panel/src-tauri/target/
+randomizer_config.json.bak
+randomizer_config.json.pending

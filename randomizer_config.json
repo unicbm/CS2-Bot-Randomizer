@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "options": {
+    "enabled": true,
+    "weaponMode": "persistent",
+    "weapons": true,
+    "knives": true,
+    "gloves": true,
+    "agents": true,
+    "music": true,
+    "stickers": true,
+    "charms": true
+  },
+  "filters": {
+    "knifeTypes": {
+      "mode": "deny",
+      "items": []
+    },
+    "weaponPaints": {
+      "mode": "deny",
+      "items": []
+    },
+    "knifePaints": {
+      "mode": "deny",
+      "items": []
+    },
+    "gloves": {
+      "mode": "deny",
+      "items": []
+    },
+    "stickers": {
+      "mode": "deny",
+      "items": []
+    },
+    "charms": {
+      "mode": "deny",
+      "items": []
+    },
+    "agents": {
+      "mode": "deny",
+      "items": []
+    },
+    "musicKits": {
+      "mode": "deny",
+      "items": []
+    }
+  }
+}

@@ -10,7 +10,16 @@ var placementPath = Path.Combine(
         ?? throw new InvalidOperationException("Catalog path has no directory."),
     "charm_placements.json");
 var charmPlacements = CharmPlacementCatalog.Load(placementPath, catalog);
+var assetCatalog = RandomizerAssetCatalog.Load(args[0], catalog);
+var configPath = Path.Combine(
+    Path.GetDirectoryName(Path.GetFullPath(args[0]))
+        ?? throw new InvalidOperationException("Catalog path has no directory."),
+    "randomizer_config.json");
+var config = RandomizerConfig.Load(configPath, catalog, assetCatalog);
 Assert(catalog.SourceRepository == "ianlucas/cs2-lib", "catalog source");
+Assert(assetCatalog.Knives.Count == 20, "configurable knife type count");
+Assert(assetCatalog.CounterTerroristAgents.Count > 0, "Counter-Terrorist agent assets");
+Assert(assetCatalog.TerroristAgents.Count > 0, "Terrorist agent assets");
 Assert(catalog.WeaponCount == 35, "weapon count");
 Assert(catalog.WeaponPaintCount == 1456, "weapon paint count");
 Assert(catalog.KnifePaintCount == 556, "knife paint count");
@@ -60,13 +69,74 @@ var secondWear = wearAllocator.Reserve(7, paint, secondStickers);
 Assert(firstWear == repeatedWear, "identical sticker signatures reuse wear");
 Assert(firstWear != secondWear, "different sticker signatures reserve unique wear");
 
-var roller = new CosmeticRoller(catalog, charmPlacements, new Random(1979));
+var roller = new CosmeticRoller(catalog, charmPlacements, assetCatalog, config, new Random(1979));
+Assert(roller.KnifeTypeCount == 20, "default config enables every catalog knife family");
 var allWeaponsLoadout = roller.RollLoadout(RandomizerAssets.TerroristTeam);
 foreach (var weaponEntry in catalog.Weapons)
 {
     Assert(roller.GetOrCreateWeapon(allWeaponsLoadout, weaponEntry.DefIndex) is not null,
         $"weapon {weaponEntry.DefIndex} roll");
 }
+var persistentAk = roller.GetOrCreateWeapon(allWeaponsLoadout, 7);
+Assert(
+    ReferenceEquals(persistentAk, roller.GetOrCreateWeapon(allWeaponsLoadout, 7)),
+    "persistent mode reuses the same per-bot weapon combination");
+
+var kaleidoscopeConfig = new RandomizerConfig
+{
+    Options = new RandomizerOptions
+    {
+        WeaponMode = WeaponRandomizationMode.Kaleidoscope
+    }
+};
+kaleidoscopeConfig.Validate(catalog, assetCatalog);
+var kaleidoscopeRoller = new CosmeticRoller(
+    catalog,
+    charmPlacements,
+    assetCatalog,
+    kaleidoscopeConfig,
+    new Random(20260724));
+var kaleidoscopeLoadout = kaleidoscopeRoller.RollLoadout(RandomizerAssets.TerroristTeam);
+var kaleidoscopeFirst = kaleidoscopeRoller.GetOrCreateWeapon(kaleidoscopeLoadout, 7);
+var kaleidoscopeSecond = kaleidoscopeRoller.GetOrCreateWeapon(kaleidoscopeLoadout, 7);
+Assert(kaleidoscopeFirst is not null && kaleidoscopeSecond is not null,
+    "kaleidoscope weapon rolls exist");
+Assert(!ReferenceEquals(kaleidoscopeFirst, kaleidoscopeSecond),
+    "kaleidoscope mode constructs a fresh combination for every weapon");
+Assert(kaleidoscopeLoadout.Weapons.Count == 0,
+    "kaleidoscope mode does not persist weapon combinations");
+
+var stableStore = new CosmeticStateStore();
+var stableState = stableStore.GetOrCreate(
+    4,
+    400,
+    RandomizerAssets.TerroristTeam,
+    music => roller.RollLoadout(RandomizerAssets.TerroristTeam, music));
+var stableKnife = stableState.Loadout.Knife;
+var stableGlove = stableState.Loadout.Glove;
+roller.GetOrCreateWeapon(stableState.Loadout, 7);
+var explicitReroll = stableStore.Reroll(
+    4,
+    400,
+    RandomizerAssets.TerroristTeam,
+    preserveMusic: false,
+    music => roller.RollLoadout(RandomizerAssets.TerroristTeam, music))
+    ?? throw new InvalidOperationException("stable reroll missing");
+Assert(explicitReroll.Loadout.Knife == stableKnife && explicitReroll.Loadout.Glove == stableGlove,
+    "explicit reroll preserves stable knife and glove identity");
+var changedTeam = stableStore.GetOrCreate(
+    4,
+    400,
+    RandomizerAssets.CounterTerroristTeam,
+    music => roller.RollLoadout(RandomizerAssets.CounterTerroristTeam, music));
+Assert(changedTeam.Loadout.Knife == stableKnife && changedTeam.Loadout.Glove == stableGlove,
+    "team change preserves stable knife and glove identity");
+roller.GetOrCreateWeapon(changedTeam.Loadout, 7);
+stableStore.InvalidateWeaponSelections();
+Assert(changedTeam.Loadout.Weapons.Count == 0,
+    "config reload invalidates guns without touching stable wearables");
+Assert(changedTeam.Loadout.Knife == stableKnife && changedTeam.Loadout.Glove == stableGlove,
+    "config reload preserves stable knife and glove identity");
 
 var sawStickers = false;
 var sawKeychain = false;
@@ -112,7 +182,12 @@ Assert(sawStickers, "sticker rolling exercised");
 Assert(sawKeychain, "keychain rolling exercised");
 Assert(sawStickerSlab, "Sticker Slab rolling exercised");
 
-var charmRoller = new CosmeticRoller(catalog, charmPlacements, new Random(20260720));
+var charmRoller = new CosmeticRoller(
+    catalog,
+    charmPlacements,
+    assetCatalog,
+    config,
+    new Random(20260720));
 var charmCount = 0;
 const int charmTrials = 10000;
 for (var iteration = 0; iteration < charmTrials; iteration++)
@@ -125,7 +200,12 @@ for (var iteration = 0; iteration < charmTrials; iteration++)
 }
 Assert(charmCount is >= 6800 and <= 7200, "70% keychain probability");
 
-var defaultPlacementRoller = new CosmeticRoller(catalog, charmPlacements, new Random(20260721));
+var defaultPlacementRoller = new CosmeticRoller(
+    catalog,
+    charmPlacements,
+    assetCatalog,
+    config,
+    new Random(20260721));
 var sawDefaultPlacementCharm = false;
 for (var iteration = 0; iteration < 100; iteration++)
 {
@@ -141,6 +221,57 @@ for (var iteration = 0; iteration < 100; iteration++)
     break;
 }
 Assert(sawDefaultPlacementCharm, "unobserved weapon charm rolling exercised");
+
+var knifeDenyConfig = new RandomizerConfig
+{
+    Filters = new RandomizerFilters
+    {
+        KnifeTypes = new SelectionFilter<ushort>
+        {
+            Mode = FilterMode.Deny,
+            Items = [506, 512]
+        }
+    }
+};
+knifeDenyConfig.Validate(catalog, assetCatalog);
+var knifeDenyRoller = new CosmeticRoller(
+    catalog,
+    charmPlacements,
+    assetCatalog,
+    knifeDenyConfig,
+    new Random(20260722));
+Assert(knifeDenyRoller.KnifeTypeCount == 18, "knife type deny-list removes whole knife families");
+for (var iteration = 0; iteration < 250; iteration++)
+{
+    var knife = knifeDenyRoller.RollLoadout(RandomizerAssets.TerroristTeam).Knife;
+    Assert(knife.DefIndex is not (506 or 512), "denied knife type never rolls");
+}
+
+var paintAllowConfig = new RandomizerConfig
+{
+    Filters = new RandomizerFilters
+    {
+        WeaponPaints = new SelectionFilter<CosmeticVariantKey>
+        {
+            Mode = FilterMode.Allow,
+            Items = [new CosmeticVariantKey(7, 302)]
+        }
+    }
+};
+paintAllowConfig.Validate(catalog, assetCatalog);
+var paintAllowRoller = new CosmeticRoller(
+    catalog,
+    charmPlacements,
+    assetCatalog,
+    paintAllowConfig,
+    new Random(20260723));
+var paintAllowLoadout = paintAllowRoller.RollLoadout(RandomizerAssets.TerroristTeam);
+Assert(
+    paintAllowRoller.GetOrCreateWeapon(paintAllowLoadout, 7)?.PaintKit == 302,
+    "weapon paint allow-list selects the configured paint");
+Assert(
+    paintAllowRoller.GetOrCreateWeapon(paintAllowLoadout, 9) is null,
+    "weapon paint allow-list leaves unlisted weapons untouched");
 
 var now = new DateTimeOffset(2026, 7, 19, 0, 0, 0, TimeSpan.Zero);
 using var ownership = new CosmeticOwnershipService(() => now);

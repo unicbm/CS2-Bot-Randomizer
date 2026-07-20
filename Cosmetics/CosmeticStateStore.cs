@@ -18,7 +18,9 @@ internal sealed class CosmeticStateStore
             if (state.Loadout.Team == team)
                 return state;
 
-            state.Loadout = loadoutFactory(state.Loadout.MusicKit);
+            var replacement = loadoutFactory(state.Loadout.MusicKit);
+            PreserveStableWearables(state.Loadout, replacement);
+            state.Loadout = replacement;
             state.Generation = NextGeneration();
             return state;
         }
@@ -39,17 +41,28 @@ internal sealed class CosmeticStateStore
         bool preserveMusic,
         Func<int?, BotCosmeticLoadout> loadoutFactory)
     {
-        int? musicKit = null;
-        if (_states.TryGetValue(slot, out var existing) && existing.UserId == userId && preserveMusic)
-            musicKit = existing.Loadout.MusicKit;
+        var hasExisting = _states.TryGetValue(slot, out var existing) && existing.UserId == userId;
+        var musicKit = hasExisting && preserveMusic ? existing!.Loadout.MusicKit : (int?)null;
+        var replacement = loadoutFactory(musicKit);
+        if (hasExisting)
+            PreserveStableWearables(existing!.Loadout, replacement);
 
         var state = new SlotCosmeticState(
             slot,
             userId,
             NextGeneration(),
-            loadoutFactory(musicKit));
+            replacement);
         _states[slot] = state;
         return state;
+    }
+
+    internal void InvalidateWeaponSelections()
+    {
+        foreach (var state in _states.Values)
+        {
+            state.Loadout.Weapons.Clear();
+            state.Generation = NextGeneration();
+        }
     }
 
     internal bool TryGet(int slot, out SlotCosmeticState state)
@@ -82,6 +95,14 @@ internal sealed class CosmeticStateStore
     }
 
     private long NextGeneration() => _nextGeneration++;
+
+    private static void PreserveStableWearables(
+        BotCosmeticLoadout existing,
+        BotCosmeticLoadout replacement)
+    {
+        replacement.Knife = existing.Knife;
+        replacement.Glove = existing.Glove;
+    }
 }
 
 internal sealed class SlotCosmeticState(

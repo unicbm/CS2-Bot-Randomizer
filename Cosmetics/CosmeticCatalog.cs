@@ -24,6 +24,17 @@ internal sealed class CosmeticCatalog
         StickerKits = document.StickerKits;
         KeychainDefinitions = document.KeychainDefinitions;
         MusicKits = document.MusicKits;
+        WeaponVariants = document.Weapons
+            .SelectMany(weapon => weapon.Paints.Select(
+                paint => new CosmeticVariantKey(weapon.DefIndex, paint.PaintKit)))
+            .ToHashSet();
+        KnifeVariants = document.Knives
+            .SelectMany(knife => knife.Paints.Select(
+                paint => new CosmeticVariantKey(knife.DefIndex, paint.PaintKit)))
+            .ToHashSet();
+        GloveVariants = document.Gloves
+            .Select(glove => new CosmeticVariantKey(glove.DefIndex, glove.PaintKit))
+            .ToHashSet();
     }
 
     internal string SourceRepository { get; }
@@ -33,6 +44,9 @@ internal sealed class CosmeticCatalog
     internal IReadOnlyList<uint> KeychainDefinitions { get; }
     internal IReadOnlyList<int> MusicKits { get; }
     internal IReadOnlyCollection<WeaponCatalogEntry> Weapons => _weapons.Values;
+    internal IReadOnlySet<CosmeticVariantKey> WeaponVariants { get; }
+    internal IReadOnlySet<CosmeticVariantKey> KnifeVariants { get; }
+    internal IReadOnlySet<CosmeticVariantKey> GloveVariants { get; }
     internal int WeaponCount => _weapons.Count;
     internal int WeaponPaintCount => _weapons.Values.Sum(entry => entry.Paints.Count);
     internal int KnifePaintCount => _knives.Values.Sum(entry => entry.Count);
@@ -60,6 +74,9 @@ internal sealed class CosmeticCatalog
 
     private static void Validate(CatalogDocument document)
     {
+        if (document.SchemaVersion != 2)
+            throw new InvalidDataException($"Unsupported cosmetic catalog schema {document.SchemaVersion}.");
+
         if (document.Source is null
             || document.Source.Repository != "ianlucas/cs2-lib"
             || document.Source.Commit.Length != 40
@@ -163,6 +180,9 @@ internal sealed class CosmeticCatalog
 
     private sealed class CatalogDocument
     {
+        [JsonPropertyName("schemaVersion")]
+        public int SchemaVersion { get; init; }
+
         [JsonPropertyName("source")]
         public CatalogSource Source { get; init; } = new();
 

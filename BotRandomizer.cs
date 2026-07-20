@@ -24,14 +24,20 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private readonly RandomizerOptions _options = new();
 
     private CosmeticCatalog? _catalog;
+    private RandomizerAssetCatalog? _assets;
+    private CharmPlacementCatalog? _charmPlacements;
+    private RandomizerConfig? _config;
     private CosmeticRoller? _roller;
     private CosmeticApplicator? _applicator;
     private WeaponItemViewStore? _weaponItemViews;
     private bool _giveNamedItemHooked;
     private bool _giveNamedItemErrorLogged;
+    private string? _configPath;
+    private DateTime _configLastWriteUtc;
+    private long _configLastLength;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.4.1";
+    public override string ModuleVersion => "1.5.0";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -57,6 +63,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventItemPickup>(OnItemPickup);
         AddTimer(1.0f, _ownership.CleanupExpired, TimerFlags.REPEAT);
+        AddTimer(1.0f, CheckConfigForChanges, TimerFlags.REPEAT);
 
         if (_weaponItemViews?.NativeAvailable == true)
         {
@@ -89,29 +96,110 @@ public sealed class BotRandomizerPlugin : BasePlugin
         {
             var catalogPath = Path.Combine(ModuleDirectory, "cosmetic_catalog.json");
             var placementPath = Path.Combine(ModuleDirectory, "charm_placements.json");
+            _configPath = Path.Combine(ModuleDirectory, "randomizer_config.json");
             _catalog = CosmeticCatalog.Load(catalogPath);
-            var charmPlacements = CharmPlacementCatalog.Load(placementPath, _catalog);
-            _roller = new CosmeticRoller(_catalog, charmPlacements);
+            _assets = RandomizerAssetCatalog.Load(catalogPath, _catalog);
+            _charmPlacements = CharmPlacementCatalog.Load(placementPath, _catalog);
+            _config = File.Exists(_configPath)
+                ? RandomizerConfig.Load(_configPath, _catalog, _assets)
+                : RandomizerConfig.CreateDefault();
+            _config.Validate(_catalog, _assets);
+            ApplyConfig(_config);
+            CaptureConfigStamp();
             Logger.LogInformation(
-                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms; {CharmPositions} observed positions for {CharmWeapons} weapons from {CharmDemos} contributing demos ({CharmDemosParsed} parsed)",
+                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {KnifeTypes} enabled knife types, {Stickers} stickers, {Charms} charms; {CharmPositions} observed positions for {CharmWeapons} weapons from {CharmDemos} contributing demos ({CharmDemosParsed} parsed)",
                 _catalog.SourceCommit[..12],
                 _catalog.WeaponCount,
                 _catalog.WeaponPaintCount,
+                _roller?.KnifeTypeCount ?? 0,
                 _catalog.StickerKits.Count,
                 _catalog.KeychainDefinitions.Count,
-                charmPlacements.PlacementCount,
-                charmPlacements.WeaponCount,
-                charmPlacements.ContributingDemoCount,
-                charmPlacements.SourceDemoCount);
+                _charmPlacements.PlacementCount,
+                _charmPlacements.WeaponCount,
+                _charmPlacements.ContributingDemoCount,
+                _charmPlacements.SourceDemoCount);
         }
         catch (Exception exception)
         {
             _catalog = null;
+            _assets = null;
+            _charmPlacements = null;
+            _config = null;
             _roller = null;
             Logger.LogError(
                 exception,
-                "[BotRandomizer] cosmetic_catalog.json or charm_placements.json is invalid; randomization disabled");
+                "[BotRandomizer] catalog, assets, placements, or randomizer_config.json is invalid; randomization disabled");
         }
+    }
+
+    private void ApplyConfig(RandomizerConfig config)
+    {
+        if (_catalog is null || _assets is null || _charmPlacements is null)
+            throw new InvalidOperationException("Cannot apply config before catalogs are loaded.");
+
+        var roller = new CosmeticRoller(_catalog, _charmPlacements, _assets, config);
+        _options.CopyFrom(config.Options);
+        _config = config;
+        _roller = roller;
+    }
+
+    private void CheckConfigForChanges()
+    {
+        if (_configPath is null || !File.Exists(_configPath))
+            return;
+
+        var info = new FileInfo(_configPath);
+        if (info.LastWriteTimeUtc == _configLastWriteUtc && info.Length == _configLastLength)
+            return;
+
+        ReloadConfig(announceSuccess: true);
+    }
+
+    private bool ReloadConfig(bool announceSuccess)
+    {
+        if (_configPath is null || _catalog is null || _assets is null)
+            return false;
+
+        try
+        {
+            var config = RandomizerConfig.Load(_configPath, _catalog, _assets);
+            ApplyConfig(config);
+            CaptureConfigStamp();
+            // Config and weapon-mode changes invalidate gun selections only. Knife and
+            // glove selections are a stable in-map bot identity and are never rerolled.
+            _states.InvalidateWeaponSelections();
+            if (_options.Enabled)
+                RestoreAllBots(CosmeticScope.All);
+            if (announceSuccess)
+            {
+                Logger.LogInformation(
+                    "[BotRandomizer] Reloaded randomizer_config.json with {KnifeTypes} eligible knife types",
+                    _roller?.KnifeTypeCount ?? 0);
+            }
+            return true;
+        }
+        catch (Exception exception)
+        {
+            CaptureConfigStamp();
+            Logger.LogError(
+                exception,
+                "[BotRandomizer] Rejected changed randomizer_config.json; previous config remains active");
+            return false;
+        }
+    }
+
+    private void CaptureConfigStamp()
+    {
+        if (_configPath is null || !File.Exists(_configPath))
+        {
+            _configLastWriteUtc = DateTime.MinValue;
+            _configLastLength = 0;
+            return;
+        }
+
+        var info = new FileInfo(_configPath);
+        _configLastWriteUtc = info.LastWriteTimeUtc;
+        _configLastLength = info.Length;
     }
 
     private void LoadAttributeWriter()
@@ -131,7 +219,11 @@ public sealed class BotRandomizerPlugin : BasePlugin
                 "[BotRandomizer] SetOrAddAttributeValueByName signature failed; economic cosmetics disabled");
         }
 
-        _applicator = new CosmeticApplicator(writer, Logger);
+        _applicator = new CosmeticApplicator(
+            writer,
+            Logger,
+            _assets?.KnifeDefIndexByName
+                ?? new Dictionary<string, ushort>(StringComparer.Ordinal));
         MemoryFunctionWithReturn<nint, nint>? itemViewConstructor = null;
         if (writer is not null)
         {
@@ -160,10 +252,13 @@ public sealed class BotRandomizerPlugin : BasePlugin
         // Keep constructed item-view storage alive across map transitions. Each view is
         // fully overwritten before reuse and is freed only at slot teardown or unload.
         _applicator?.Reset();
-        foreach (var model in RandomizerAssets.CounterTerroristModels)
-            Server.PrecacheModel(model);
-        foreach (var model in RandomizerAssets.TerroristModels)
-            Server.PrecacheModel(model);
+        if (_assets is not null)
+        {
+            foreach (var agent in _assets.CounterTerroristAgents)
+                Server.PrecacheModel(agent.ModelPath);
+            foreach (var agent in _assets.TerroristAgents)
+                Server.PrecacheModel(agent.ModelPath);
+        }
     }
 
     private void OnClientDisconnect(int playerSlot)
@@ -574,7 +669,19 @@ public sealed class BotRandomizerPlugin : BasePlugin
             $"weapons={Format(_options.Weapons)} knives={Format(_options.Knives)} "
             + $"gloves={Format(_options.Gloves)} agents={Format(_options.Agents)} "
             + $"music={Format(_options.Music)} stickers={Format(_options.Stickers)} "
-            + $"charms={Format(_options.Charms)} states={_states.States.Count}");
+            + $"charms={Format(_options.Charms)} weapon_mode={_options.WeaponMode.ToString().ToLowerInvariant()} "
+            + $"knife_types={_roller?.KnifeTypeCount ?? 0} "
+            + $"states={_states.States.Count}");
+    }
+
+    [ConsoleCommand("br_reload_config", "Reload randomizer_config.json from disk")]
+    [RequiresPermissions("@css/cvar")]
+    public void OnReloadConfigCommand(CCSPlayerController? player, CommandInfo command)
+    {
+        command.ReplyToCommand(
+            ReloadConfig(announceSuccess: false)
+                ? $"BotRandomizer config reloaded; knife_types={_roller?.KnifeTypeCount ?? 0}."
+                : "BotRandomizer config reload failed; see the server log.");
     }
 
     [ConsoleCommand("br_set", "Set a BotRandomizer runtime option")]
@@ -612,7 +719,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
             RestoreAllBots(scope);
     }
 
-    [ConsoleCommand("br_reroll", "Reroll all bots or one bot slot")]
+    [ConsoleCommand("br_reroll", "Reroll guns and identity while preserving stable knives and gloves")]
     [RequiresPermissions("@css/cvar")]
     public void OnRerollCommand(CCSPlayerController? player, CommandInfo command)
     {
@@ -645,7 +752,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
             rerolled++;
         }
 
-        command.ReplyToCommand($"Rerolled {rerolled} bot loadout(s).");
+        command.ReplyToCommand($"Rerolled {rerolled} bot loadout(s); knives and gloves preserved.");
     }
 
     [ConsoleCommand("br_ownership", "Show active cosmetic ownership leases")]
@@ -671,10 +778,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     {
         setter();
         foreach (var state in _states.States)
-        {
             _states.BumpGeneration(state.Slot);
-            _applicator?.ClearSlot(state.Slot);
-        }
         return scope;
     }
 

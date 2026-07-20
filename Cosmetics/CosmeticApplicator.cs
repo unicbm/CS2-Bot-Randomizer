@@ -10,15 +10,18 @@ internal sealed class CosmeticApplicator
 {
     private readonly MemoryFunctionWithReturn<nint, string, float, int>? _setAttributeByName;
     private readonly ILogger _logger;
+    private readonly IReadOnlyDictionary<string, ushort> _knifeDefIndexByName;
     private readonly Dictionary<int, AppliedKnifeCosmetic> _appliedKnives = [];
     private readonly Dictionary<int, AppliedGloveCosmetic> _appliedGloves = [];
 
     internal CosmeticApplicator(
         MemoryFunctionWithReturn<nint, string, float, int>? setAttributeByName,
-        ILogger logger)
+        ILogger logger,
+        IReadOnlyDictionary<string, ushort> knifeDefIndexByName)
     {
         _setAttributeByName = setAttributeByName;
         _logger = logger;
+        _knifeDefIndexByName = knifeDefIndexByName;
     }
 
     internal bool NativeAvailable => _setAttributeByName is not null;
@@ -190,7 +193,7 @@ internal sealed class CosmeticApplicator
             {
                 var weapon = handle.Value;
                 if (weapon is not { IsValid: true }
-                    || !RandomizerAssets.KnifeDefIndexByName.TryGetValue(
+                    || !_knifeDefIndexByName.TryGetValue(
                         weapon.DesignerName,
                         out var defIndex))
                 {

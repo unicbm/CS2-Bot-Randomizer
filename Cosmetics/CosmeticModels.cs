@@ -22,7 +22,16 @@ internal sealed record GloveCatalogEntry(
 internal readonly record struct KnifeDefinition(
     string DesignerName,
     ushort DefIndex,
+    string Name,
+    string NameZh);
+
+internal readonly record struct AgentDefinition(
+    byte Team,
     string ModelPath);
+
+internal readonly record struct CosmeticVariantKey(
+    ushort DefIndex,
+    int PaintKit);
 
 internal sealed record StickerSelection(
     uint DefIndex,
@@ -56,19 +65,26 @@ internal sealed record KnifeSelection(ushort DefIndex, int PaintKit, float Wear)
 
 internal sealed record GloveSelection(ushort DefIndex, int PaintKit, float Wear);
 
+internal enum WeaponRandomizationMode
+{
+    Persistent,
+    Kaleidoscope
+}
+
 internal sealed class BotCosmeticLoadout
 {
     public required byte Team { get; init; }
     public required string AgentModel { get; init; }
     public required int MusicKit { get; init; }
-    public required KnifeSelection Knife { get; init; }
-    public required GloveSelection Glove { get; init; }
+    public required KnifeSelection Knife { get; set; }
+    public required GloveSelection Glove { get; set; }
     public Dictionary<ushort, WeaponCosmeticSelection> Weapons { get; } = new();
 }
 
 internal sealed class RandomizerOptions
 {
     public bool Enabled { get; set; } = true;
+    public WeaponRandomizationMode WeaponMode { get; set; } = WeaponRandomizationMode.Persistent;
     public bool Weapons { get; set; } = true;
     public bool Knives { get; set; } = true;
     public bool Gloves { get; set; } = true;
@@ -76,4 +92,17 @@ internal sealed class RandomizerOptions
     public bool Music { get; set; } = true;
     public bool Stickers { get; set; } = true;
     public bool Charms { get; set; } = true;
+
+    internal void CopyFrom(RandomizerOptions source)
+    {
+        Enabled = source.Enabled;
+        WeaponMode = source.WeaponMode;
+        Weapons = source.Weapons;
+        Knives = source.Knives;
+        Gloves = source.Gloves;
+        Agents = source.Agents;
+        Music = source.Music;
+        Stickers = source.Stickers;
+        Charms = source.Charms;
+    }
 }

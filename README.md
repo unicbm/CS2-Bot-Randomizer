@@ -4,7 +4,27 @@ CounterStrikeSharp plugin that gives each bot a stable cosmetic loadout: agent,
 music kit, knife, gloves, weapon paint, up to five stickers, and an optional
 charm.
 
-## What changed in 1.4
+## What changed in 1.5
+
+- `randomizer_config.json` is now the shared truth source for the plugin and the
+  desktop Panel. Every supported cosmetic family has an independent `allow`
+  (whitelist) or `deny` (blacklist) filter.
+- Knife family filtering happens before knife-paint filtering. A single entry
+  can therefore exclude every Gut Knife or Falchion Knife econ instead of
+  enumerating its paints one by one.
+- The default config uses an empty knife-family blacklist, so all 20 cataloged
+  knife types are eligible. The former Bayonet/Karambit/M9/Butterfly-only pool
+  is no longer hard-coded.
+- Weapon behavior has two modes: `persistent` keeps one complete combination
+  per Bot and weapon definition, while `kaleidoscope` rerolls the paint,
+  stickers, and charm whenever a new weapon entity is constructed.
+- Knife and glove selections are stable wearable identity. Team changes,
+  config hot reload, weapon-mode changes, and `br_reroll` never reroll them;
+  the applicator only writes again if CS2 replaces the underlying entity.
+- The Tauri Panel under `Panel/` reads and validates the same config, remembers
+  the selected local plugin directory, shows bilingual names, rarity,
+  collection/category ownership and CDN thumbnails, and saves with a local
+  backup. The running plugin detects a valid save in about one second.
 
 - Weapon paints, knife paints, gloves, stickers, charms, model-specific sticker
   schemas, and wear ranges come from the bundled `cosmetic_catalog.json`.
@@ -38,14 +58,44 @@ charm.
   override plugins. Releasing a lease restores the frozen random baseline by
   default.
 
-The plugin deliberately keeps the original, verified four-knife subclass set.
-The larger catalog is used to select only paints valid for the selected weapon,
-knife, or glove definition; it does not guess IDs from numeric ranges.
+The catalog includes all 20 current knife families and selects only paints that
+actually belong to the chosen weapon, knife, or glove definition. It does not
+guess IDs from numeric ranges.
+
+## Randomizer config
+
+Each filter has a `mode` and an `items` array:
+
+- `allow`: only listed items enter that random pool.
+- `deny`: all catalog items enter except the listed items.
+- Variant filters (`weaponPaints`, `knifePaints`, and `gloves`) use
+  `{ "defIndex": ..., "paintKit": ... }` so ownership stays explicit.
+- `knifeTypes` uses knife definition indexes. For example, an empty deny list
+  allows all knives; `[506, 512]` denies Gut Knife and Falchion Knife in one
+  operation.
+
+Invalid IDs, duplicates, unsupported schemas, or a configuration that empties
+an essential knife/glove/agent/music pool are rejected. During hot reload the
+previous valid config remains active.
+
+`options.weaponMode` accepts:
+
+- `persistent` (default): a Bot buying the same weapon definition again gets
+  the same paint, sticker stack, and charm combination for that in-map state.
+- `kaleidoscope`: every newly constructed gun independently rerolls the entire
+  allowed combination. Knife and glove identity is explicitly excluded from
+  this mode and remains stable.
 
 ## Runtime behavior
 
-- Each `(bot slot, weapon definition)` gets one stable weapon selection until a
-  team change, map change, or explicit reroll.
+- In persistent mode, each `(bot slot, weapon definition)` gets one stable
+  weapon selection until a team change, map change, explicit reroll, or config
+  reload.
+- In kaleidoscope mode, every purchase or other new weapon construction gets a
+  fresh paint/sticker/charm roll from the same configured pools.
+- A Bot's knife and glove selection is fixed for its in-map identity. Spawn
+  retries are fingerprinted no-ops; a write is repeated only when CS2 has
+  replaced the actual pawn, knife entity, or glove item view.
 - Weapon entities are born with their complete cosmetic state through the
   `GiveNamedItem` pre-hook. Only the constructed item view's
   `NetworkedDynamicAttributes` list is populated; no live-weapon attribute list
@@ -69,6 +119,7 @@ br_status
 br_set <enabled|weapons|knives|gloves|agents|music|stickers|charms> <on|off>
 br_reroll [all|slot]
 br_ownership
+br_reload_config
 ```
 
 Changing settings, rerolling, and viewing ownership require `@css/cvar`.
@@ -103,6 +154,11 @@ C:\Users\Uni\.dotnet\dotnet.exe build -c Release
 C:\Users\Uni\.dotnet\dotnet.exe run `
   --project tests\BotRandomizer.SelfTest\BotRandomizer.SelfTest.csproj `
   -c Release -- cosmetic_catalog.json
+
+Set-Location Panel
+npm.cmd install
+npm.cmd run build
+cargo check --manifest-path src-tauri\Cargo.toml
 ```
 
 The self-test validates catalog counts and provenance, exact designer-name to
@@ -119,6 +175,8 @@ Clone a reviewed `ianlucas/cs2-lib` revision, then run:
 ```powershell
 node tools\generate-cosmetic-catalog.mjs `
   C:\path\to\cs2-lib\src\items.ts `
+  C:\path\to\cs2-lib\src\translations\english.ts `
+  C:\path\to\cs2-lib\src\translations\schinese.ts `
   cosmetic_catalog.json `
   <full-40-character-cs2-lib-commit>
 ```
@@ -142,14 +200,19 @@ different weapon models.
 ## Installation
 
 1. Build or download the release.
-2. Place `BotRandomizer.dll`, `cosmetic_catalog.json`, and
-   `charm_placements.json` under
+2. Place `BotRandomizer.dll`, `cosmetic_catalog.json`,
+   `charm_placements.json`, and `randomizer_config.json` under
    `addons/counterstrikesharp/plugins/BotRandomizer/`.
 3. Place `BotRandomizer.API.dll` in the shared path shown above.
 4. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
    `configs/core.json`.
 5. Restart the server and check `br_status` before enabling another cosmetic
    writer.
+
+To use the desktop editor, build it with `npm.cmd run tauri -- build` from
+`Panel/`, launch the resulting executable, and select the plugin directory from
+step 2. The Panel stores only that local directory in its app-config state;
+the randomizer rules remain in `randomizer_config.json` beside the plugin.
 
 ## Credits and licensing
 

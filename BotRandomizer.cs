@@ -290,6 +290,16 @@ public sealed class BotRandomizerPlugin : BasePlugin
             (byte)@event.Team,
             preserveMusic: true,
             music => _roller.RollLoadout((byte)@event.Team, music));
+        if (_options.Enabled)
+        {
+            var slot = player.Slot;
+            AddTimer(
+                0.10f,
+                () => RestoreBot(
+                    slot,
+                    CosmeticScope.Agent | CosmeticScope.Knife | CosmeticScope.Gloves),
+                TimerFlags.STOP_ON_MAPCHANGE);
+        }
         return HookResult.Continue;
     }
 
@@ -380,7 +390,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
             && _options.Gloves
             && _ownership.CanWrite(state.Slot, CosmeticScope.Gloves))
         {
-            if (_applicator.ApplyGloves(player, pawn, state.Loadout.Glove, out var changed) && changed)
+            if (_applicator.ApplyGloves(player, pawn, state.Loadout.Glove))
             {
                 var generation = state.Generation;
                 var pawnHandle = pawn.Handle;

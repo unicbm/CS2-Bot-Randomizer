@@ -120,10 +120,8 @@ internal sealed class CosmeticApplicator
     internal bool ApplyGloves(
         CCSPlayerController player,
         CCSPlayerPawn pawn,
-        GloveSelection selection,
-        out bool changed)
+        GloveSelection selection)
     {
-        changed = false;
         if (_setAttributeByName is null || !pawn.IsValid)
             return false;
 
@@ -162,7 +160,6 @@ internal sealed class CosmeticApplicator
                 item.ItemID,
                 item.ItemDefinitionIndex,
                 item.AccountID);
-            changed = true;
             return true;
         }
         catch (Exception exception)

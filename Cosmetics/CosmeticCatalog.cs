@@ -61,6 +61,7 @@ internal sealed class CosmeticCatalog
     internal IReadOnlyList<uint> KeychainDefinitions { get; }
     internal IReadOnlyList<int> MusicKits { get; }
     internal IReadOnlyCollection<WeaponCatalogEntry> Weapons => _weapons.Values;
+    internal IReadOnlyCollection<ushort> KnifeDefinitions => _knives.Keys;
     internal int WeaponCount => _weapons.Count;
     internal int WeaponPaintCount => _weapons.Values.Sum(entry => entry.Paints.Count);
     internal int KnifePaintCount => _knives.Values.Sum(entry => entry.Count);

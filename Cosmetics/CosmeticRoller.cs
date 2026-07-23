@@ -2,45 +2,124 @@ namespace BotRandomizer;
 
 internal sealed class CosmeticRoller
 {
-    private const int MaximumStickers = 5;
-    private const int CleanCraftThreshold = 35;
-    private const int SingleStickerCraftThreshold = 47;
-    private const int PairCraftThreshold = 55;
-    private const int ThreeStickerCraftThreshold = 63;
-    private const int FourStickerCraftThreshold = 88;
     private const int StickerSlabDefinition = 37;
     private const int MinimumKeychainSeed = 1;
     private const int MaximumKeychainSeed = 100000;
-    private const int KeychainChanceNumerator = 7;
-    private const int KeychainChanceDenominator = 10;
 
     private readonly Random _random;
     private readonly CosmeticCatalog _catalog;
     private readonly CharmPlacementCatalog _charmPlacements;
     private readonly WeaponWearAllocator _wearAllocator = new();
+    private readonly RandomizerWeights _weights;
+    private readonly IReadOnlyList<KnifeDefinition> _knives;
+    private readonly IReadOnlyDictionary<ushort, IReadOnlyList<KnifePaintCatalogEntry>> _knifePaints;
+    private readonly IReadOnlyDictionary<ushort, IReadOnlyList<PaintCatalogEntry>> _weaponPaints;
+    private readonly IReadOnlyList<IReadOnlyList<GloveCatalogEntry>> _gloveFamilies;
+    private readonly IReadOnlyList<IReadOnlyList<StickerCatalogEntry>> _stickerCategoryPools;
+    private readonly IReadOnlyList<uint> _keychainDefinitions;
+    private readonly IReadOnlyList<int> _musicKits;
+    private readonly IReadOnlyList<string> _counterTerroristModels;
+    private readonly IReadOnlyList<string> _terroristModels;
 
     internal CosmeticRoller(
         CosmeticCatalog catalog,
         CharmPlacementCatalog charmPlacements,
         Random? random = null)
+        : this(
+            catalog,
+            charmPlacements,
+            RandomizerConfig.CreateDefault(catalog),
+            random)
+    {
+    }
+
+    internal CosmeticRoller(
+        CosmeticCatalog catalog,
+        CharmPlacementCatalog charmPlacements,
+        RandomizerConfig config,
+        Random? random = null)
     {
         _catalog = catalog;
         _charmPlacements = charmPlacements;
+        _weights = config.Weights;
         _random = random ?? new Random();
+
+        var knifePaints = new Dictionary<ushort, IReadOnlyList<KnifePaintCatalogEntry>>();
+        var knives = new List<KnifeDefinition>();
+        foreach (var definition in catalog.KnifeDefinitions)
+        {
+            var weight = _weights.GetKnifeTypeWeight(definition);
+            if (weight <= 0 || !config.Filters.KnifeTypes.Includes(definition))
+                continue;
+            if (!catalog.TryGetKnifePaints(definition, out var availablePaints))
+                continue;
+            var paints = availablePaints
+                .Where(paint => config.Filters.KnifePaints.Includes(
+                    new CosmeticVariantKey(definition, paint.PaintKit)))
+                .ToArray();
+            if (paints.Length == 0)
+                continue;
+            knives.Add(new KnifeDefinition(definition, weight));
+            knifePaints.Add(definition, paints);
+        }
+        _knives = RequirePool(knives, "knife type/paint");
+        _knifePaints = knifePaints;
+
+        _weaponPaints = catalog.Weapons.ToDictionary(
+            weapon => weapon.DefIndex,
+            weapon => (IReadOnlyList<PaintCatalogEntry>)weapon.Paints
+                .Where(paint => config.Filters.WeaponPaints.Includes(
+                    new CosmeticVariantKey(weapon.DefIndex, paint.PaintKit)))
+                .ToArray());
+
+        _gloveFamilies = RequirePool(
+            catalog.Gloves
+                .Where(glove => config.Filters.Gloves.Includes(
+                    new CosmeticVariantKey(glove.DefIndex, glove.PaintKit)))
+                .GroupBy(glove => glove.DefIndex)
+                .Select(group => (IReadOnlyList<GloveCatalogEntry>)group.ToArray())
+                .Where(group => _weights.GetGloveFamilyWeight(group[0].DefIndex) > 0)
+                .ToArray(),
+            "glove family");
+
+        _stickerCategoryPools = catalog.StickerCategoryPools
+            .Select(pool => (IReadOnlyList<StickerCatalogEntry>)pool
+                .Where(sticker => config.Filters.Stickers.Includes(sticker.DefIndex))
+                .ToArray())
+            .Where(pool => pool.Count > 0)
+            .ToArray();
+        _keychainDefinitions = catalog.KeychainDefinitions
+            .Where(config.Filters.Charms.Includes)
+            .ToArray();
+        _musicKits = RequirePool(
+            catalog.MusicKits.Where(config.Filters.MusicKits.Includes).ToArray(),
+            "music kit");
+        _counterTerroristModels = RequirePool(
+            RandomizerAssets.CounterTerroristModels
+                .Where(config.Filters.Agents.Includes)
+                .ToArray(),
+            "Counter-Terrorist agent");
+        _terroristModels = RequirePool(
+            RandomizerAssets.TerroristModels
+                .Where(config.Filters.Agents.Includes)
+                .ToArray(),
+            "Terrorist agent");
     }
+
+    internal int KnifeTypeCount => _knives.Count;
 
     internal BotCosmeticLoadout RollLoadout(byte team, int? preservedMusicKit = null)
     {
         var modelPool = team == RandomizerAssets.CounterTerroristTeam
-            ? RandomizerAssets.CounterTerroristModels
-            : RandomizerAssets.TerroristModels;
+            ? _counterTerroristModels
+            : _terroristModels;
         var (knife, glove) = RollOutfit();
 
         return new BotCosmeticLoadout
         {
             Team = team,
             AgentModel = Pick(modelPool),
-            MusicKit = preservedMusicKit ?? Pick(_catalog.MusicKits),
+            MusicKit = preservedMusicKit ?? Pick(_musicKits),
             Knife = knife,
             Glove = glove
         };
@@ -50,10 +129,14 @@ internal sealed class CosmeticRoller
     {
         if (loadout.Weapons.TryGetValue(defIndex, out var existing))
             return existing;
-        if (!_catalog.TryGetWeapon(defIndex, out var weapon) || weapon.Paints.Count == 0)
+        if (!_catalog.TryGetWeapon(defIndex, out var weapon)
+            || !_weaponPaints.TryGetValue(defIndex, out var paints)
+            || paints.Count == 0)
+        {
             return null;
+        }
 
-        var paint = PickWeaponPaint(weapon.Paints);
+        var paint = PickWeaponPaint(paints);
         var stickers = RollStickers(paint.Legacy
             ? weapon.LegacyStickerSchemaCount
             : weapon.StickerSchemaCount);
@@ -74,18 +157,12 @@ internal sealed class CosmeticRoller
 
     private (KnifeSelection Knife, GloveSelection Glove) RollOutfit()
     {
-        var knifeDefinition = PickWeighted(
-            RandomizerAssets.Knives,
-            knife => knife.Weight);
-        if (!_catalog.TryGetKnifePaints(knifeDefinition.DefIndex, out var knifePaints))
-        {
-            throw new InvalidOperationException(
-                $"No paint catalog for knife {knifeDefinition.DefIndex}.");
-        }
-        var knifePaint = PickKnifePaint(knifePaints);
-        var glove = PickWeighted(
-            _catalog.Gloves,
-            gloveVariant => RandomizerAssets.GetGloveVariantWeight(gloveVariant.DefIndex));
+        var knifeDefinition = PickWeighted(_knives, knife => knife.Weight);
+        var knifePaint = PickKnifePaint(_knifePaints[knifeDefinition.DefIndex]);
+        var gloveFamily = PickWeighted(
+            _gloveFamilies,
+            family => _weights.GetGloveFamilyWeight(family[0].DefIndex));
+        var glove = Pick(gloveFamily);
         return (
             new KnifeSelection(
                 knifeDefinition.DefIndex,
@@ -99,37 +176,41 @@ internal sealed class CosmeticRoller
 
     private IReadOnlyList<StickerSelection> RollStickers(int schemaCount)
     {
-        if (_catalog.StickerKits.Count == 0 || schemaCount <= 0)
+        if (_stickerCategoryPools.Count == 0 || schemaCount <= 0)
             return Array.Empty<StickerSelection>();
 
-        var craftRoll = _random.Next(100);
-        if (craftRoll < CleanCraftThreshold)
+        var count = Math.Min(
+            PickWeighted(
+                Enumerable.Range(0, 6).ToArray(),
+                _weights.GetStickerCountWeight),
+            schemaCount);
+        if (count == 0)
             return Array.Empty<StickerSelection>();
 
         var category = PickStickerCategory();
-        var count = Math.Min(
-            craftRoll < SingleStickerCraftThreshold
-                ? 1
-                : craftRoll < PairCraftThreshold
-                    ? 2
-                    : craftRoll < ThreeStickerCraftThreshold
-                        ? 3
-                        : craftRoll < FourStickerCraftThreshold
-                            ? 4
-                            : 5,
-            schemaCount);
-        var repeated = count == 1 || _random.Next(100) < GetRepeatChance(count);
+        var repeated = count == 1
+            || _random.Next(100) < _weights.GetStickerRepeatChance(count);
         if (!repeated && category.Count < count)
-            category = PickStickerCategory(count);
+        {
+            var eligibleCategories = _stickerCategoryPools
+                .Where(candidate => candidate.Count >= count)
+                .ToArray();
+            if (eligibleCategories.Length > 0)
+            {
+                category = PickWeighted(
+                    eligibleCategories,
+                    candidate => Math.Max(1, (int)Math.Round(Math.Sqrt(candidate.Count))));
+            }
+            else
+            {
+                repeated = true;
+            }
+        }
         var craftPool = count == 4
             ? PickFourStickerFinishPool(category, repeated)
             : category;
         if (repeated)
-        {
-            return RepeatSticker(
-                PickSticker(craftPool),
-                count);
-        }
+            return RepeatSticker(PickSticker(craftPool), count);
 
         var selections = new StickerSelection[count];
         var used = new HashSet<uint>();
@@ -155,14 +236,12 @@ internal sealed class CosmeticRoller
         return selections;
     }
 
-    private static StickerSelection CreateSticker(
-        StickerCatalogEntry sticker,
-        int slot)
+    private static StickerSelection CreateSticker(StickerCatalogEntry sticker, int slot)
         => new(sticker.DefIndex, slot, (uint)slot);
 
     private IReadOnlyList<StickerCatalogEntry> PickStickerCategory(int minimumCount = 1)
         => PickWeighted(
-            _catalog.StickerCategoryPools
+            _stickerCategoryPools
                 .Where(category => category.Count >= minimumCount)
                 .ToArray(),
             category => Math.Max(1, (int)Math.Round(Math.Sqrt(category.Count))));
@@ -175,7 +254,10 @@ internal sealed class CosmeticRoller
             .ToArray();
         var finishPool = PickWeighted(
             finishPools,
-            pool => RandomizerAssets.GetStickerFinishWeight(pool[0].Finish));
+            pool => _weights.GetStickerFinishWeight(
+                pool[0].Finish,
+                fourSticker: false,
+                repeated: false));
         return Pick(finishPool);
     }
 
@@ -192,29 +274,22 @@ internal sealed class CosmeticRoller
             : finishPools.Where(pool => pool.Count >= 4).ToArray();
         return PickWeighted(
             eligiblePools.Length > 0 ? eligiblePools : finishPools,
-            pool => repeated
-                ? RandomizerAssets.GetFourRepeatStickerFinishWeight(pool[0].Finish)
-                : RandomizerAssets.GetFourMixedStickerFinishWeight(pool[0].Finish));
+            pool => _weights.GetStickerFinishWeight(
+                pool[0].Finish,
+                fourSticker: true,
+                repeated));
     }
-
-    private static int GetRepeatChance(int count)
-        => count switch
-        {
-            2 => 25,
-            3 => 28,
-            4 => 41,
-            5 => 21,
-            _ => 100
-        };
 
     private KeychainSelection? RollKeychain(ushort weaponDefIndex)
     {
-        if (_catalog.KeychainDefinitions.Count == 0
-            || _random.Next(KeychainChanceDenominator) >= KeychainChanceNumerator)
+        if (_keychainDefinitions.Count == 0
+            || _random.Next(100) >= _weights.CharmChance)
+        {
             return null;
+        }
 
-        var definition = Pick(_catalog.KeychainDefinitions);
-        var sticker = definition == StickerSlabDefinition
+        var definition = Pick(_keychainDefinitions);
+        var sticker = definition == StickerSlabDefinition && _stickerCategoryPools.Count > 0
             ? PickSticker(PickStickerCategory()).DefIndex
             : (uint?)null;
         var placement = _charmPlacements.TryGetPlacements(weaponDefIndex, out var placements)
@@ -237,7 +312,7 @@ internal sealed class CosmeticRoller
             .ToArray();
         var rarityPool = PickWeighted(
             rarityPools,
-            pool => RandomizerAssets.GetWeaponRarityWeight(pool[0].Rarity));
+            pool => _weights.GetWeaponRarityWeight(pool[0].Rarity));
         return Pick(rarityPool);
     }
 
@@ -267,13 +342,13 @@ internal sealed class CosmeticRoller
         foreach (var value in values)
         {
             var weight = getWeight(value);
-            if (weight <= 0)
-                throw new InvalidOperationException("Cosmetic weights must be positive.");
+            if (weight < 0)
+                throw new InvalidOperationException("Cosmetic weights cannot be negative.");
             totalWeight = checked(totalWeight + weight);
         }
 
         if (totalWeight == 0)
-            throw new InvalidOperationException("Cannot roll from an empty cosmetic pool.");
+            return Pick(values);
 
         var roll = _random.Next(totalWeight);
         foreach (var value in values)
@@ -289,4 +364,9 @@ internal sealed class CosmeticRoller
 
     private static float DefaultWear(float minimum, float maximum)
         => Math.Clamp(0.01f, minimum, maximum);
+
+    private static IReadOnlyList<T> RequirePool<T>(IReadOnlyList<T> values, string label)
+        => values.Count > 0
+            ? values
+            : throw new InvalidDataException($"Randomizer config leaves the {label} pool empty.");
 }

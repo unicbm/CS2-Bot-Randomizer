@@ -24,9 +24,10 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private WeaponItemViewStore? _weaponItemViews;
     private bool _giveNamedItemHooked;
     private bool _giveNamedItemErrorLogged;
+    private bool _customConfigActive;
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.4.1";
+    public override string ModuleVersion => "1.5.0";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
@@ -69,20 +70,43 @@ public sealed class BotRandomizerPlugin : BasePlugin
     {
         try
         {
+            _roller = null;
             var catalogPath = Path.Combine(ModuleDirectory, "cosmetic_catalog.json");
             var placementPath = Path.Combine(ModuleDirectory, "charm_placements.json");
+            var configPath = Path.Combine(ModuleDirectory, "randomizer_config.json");
             _catalog = CosmeticCatalog.Load(catalogPath);
             var charmPlacements = CharmPlacementCatalog.Load(placementPath, _catalog);
-            _roller = new CosmeticRoller(_catalog, charmPlacements);
+            var defaultConfig = RandomizerConfig.CreateDefault(_catalog);
+            var config = defaultConfig;
+            _customConfigActive = false;
+            if (File.Exists(configPath))
+            {
+                try
+                {
+                    config = RandomizerConfig.Load(configPath, _catalog);
+                    _roller = new CosmeticRoller(_catalog, charmPlacements, config);
+                    _customConfigActive = true;
+                }
+                catch (Exception exception)
+                {
+                    Logger.LogError(
+                        exception,
+                        "[BotRandomizer] randomizer_config.json is invalid; using built-in defaults");
+                }
+            }
+            _roller ??= new CosmeticRoller(_catalog, charmPlacements, defaultConfig);
+            _options.CopyFrom(_customConfigActive ? config.Options : defaultConfig.Options);
             Logger.LogInformation(
-                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {Stickers} stickers, {Charms} charms; {CharmPositions} charm positions for {CharmWeapons} weapons; compact priors from {ProDemos} pro maps and {KnifeObservations} knife observations",
+                "[BotRandomizer] Catalog {Commit}: {Weapons} weapons, {Paints} weapon paints, {KnifeTypes} knife types, {Stickers} stickers, {Charms} charms; {CharmPositions} charm positions for {CharmWeapons} weapons; profile={Profile}; compact priors from {ProDemos} pro maps and {KnifeObservations} knife observations",
                 _catalog.SourceCommit[..12],
                 _catalog.WeaponCount,
                 _catalog.WeaponPaintCount,
+                _roller.KnifeTypeCount,
                 _catalog.StickerKits.Count,
                 _catalog.KeychainDefinitions.Count,
                 charmPlacements.PlacementCount,
                 charmPlacements.WeaponCount,
+                _customConfigActive ? "gui" : "default",
                 _catalog.SourceLogicalMaps,
                 _catalog.SourceKnifeObservations);
         }
@@ -90,6 +114,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
         {
             _catalog = null;
             _roller = null;
+            _customConfigActive = false;
             Logger.LogError(
                 exception,
                 "[BotRandomizer] cosmetic_catalog.json or charm_placements.json is invalid; randomization disabled");
@@ -513,7 +538,8 @@ public sealed class BotRandomizerPlugin : BasePlugin
             $"BotRandomizer version={ModuleVersion} "
             + $"enabled={Format(_options.Enabled)} native={Format(_applicator?.NativeAvailable == true)} "
             + $"weapon_prebuild={Format(_weaponItemViews?.NativeAvailable == true)} "
-            + $"catalog={(_catalog is null ? "invalid" : _catalog.SourceCommit[..12])}");
+            + $"catalog={(_catalog is null ? "invalid" : _catalog.SourceCommit[..12])} "
+            + $"profile={(_customConfigActive ? "gui" : "default")}");
         command.ReplyToCommand(
             $"weapons={Format(_options.Weapons)} knives={Format(_options.Knives)} "
             + $"gloves={Format(_options.Gloves)} agents={Format(_options.Agents)} "

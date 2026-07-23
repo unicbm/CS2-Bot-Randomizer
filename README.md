@@ -96,6 +96,13 @@ br_reroll [all|slot]
 
 Changing settings and rerolling require `@css/cvar`. `br_status` is read-only.
 
+## Optional GUI profile
+
+`randomizer_config.json` may be placed beside the plugin to configure compact
+weights and cosmetic allowlists or blacklists. It is read once when the plugin
+loads. Invalid profiles fall back to the built-in defaults; there is no
+file-watcher or live entity rewrite.
+
 ## Build and validate
 
 ```powershell

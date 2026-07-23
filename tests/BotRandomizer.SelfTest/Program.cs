@@ -50,16 +50,29 @@ foreach (var (designerName, defIndex) in new (string, ushort)[]
 }
 Assert(catalog.Weapons.All(weapon => weapon.DesignerName.StartsWith("weapon_", StringComparison.Ordinal)),
     "weapon designer names");
+var defaultConfig = RandomizerConfig.CreateDefault(catalog);
+defaultConfig.Validate(catalog);
+Assert(defaultConfig.SchemaVersion == 2, "GUI config schema");
+Assert(defaultConfig.Weights.KnifeTypes.Values.Sum() == 100, "GUI knife weights normalized");
+Assert(defaultConfig.Weights.StickerCounts["4"] == 25, "GUI four-sticker default");
+var filteredConfig = RandomizerConfig.CreateDefault(catalog);
+filteredConfig.Filters.KnifeTypes.Items.Add(515);
+filteredConfig.Validate(catalog);
+var filteredRoller = new CosmeticRoller(catalog, charmPlacements, filteredConfig, new Random(515));
+Assert(filteredRoller.KnifeTypeCount == RandomizerAssets.Knives.Length - 1,
+    "GUI knife blacklist pool");
+for (var iteration = 0; iteration < 100; iteration++)
+{
+    Assert(filteredRoller.RollLoadout(RandomizerAssets.TerroristTeam).Knife.DefIndex != 515,
+        "GUI knife blacklist excludes Butterfly");
+}
 
-var gloveWeights = catalog.Gloves
-    .GroupBy(glove => glove.DefIndex)
-    .ToDictionary(
-        group => group.Key,
-        group => group.Sum(glove => RandomizerAssets.GetGloveVariantWeight(glove.DefIndex)));
+var gloveWeights = defaultConfig.Weights.GloveFamilies
+    .ToDictionary(pair => ushort.Parse(pair.Key), pair => pair.Value);
 var gloveWeightTotal = gloveWeights.Values.Sum();
-Assert(gloveWeightTotal == 245, "glove weight total");
-Assert(gloveWeights[5030] == 76, "Sport Gloves weight");
-Assert(gloveWeights[5034] == 57, "Specialist Gloves weight");
+Assert(gloveWeightTotal == 100, "glove weight total");
+Assert(gloveWeights[5030] == 31, "Sport Gloves weight");
+Assert(gloveWeights[5034] == 24, "Specialist Gloves weight");
 
 var gloveRoller = new CosmeticRoller(catalog, charmPlacements, new Random(20260722));
 var gloveCounts = new Dictionary<ushort, int>();
@@ -250,7 +263,7 @@ var akRarityWeights = akCatalog.Paints
     .Distinct()
     .ToDictionary(
         rarity => rarity,
-        rarity => RandomizerAssets.GetWeaponRarityWeight(rarity));
+        rarity => defaultConfig.Weights.GetWeaponRarityWeight(rarity));
 var akRarityWeightTotal = akRarityWeights.Values.Sum();
 foreach (var (rarity, weight) in akRarityWeights)
 {
@@ -288,11 +301,11 @@ foreach (var (count, expected) in expectedRepeatShares)
     Assert(Math.Abs(observed - expected) < 0.02,
         $"{count}-sticker repeat probability");
 }
-Assert(RandomizerAssets.GetFourRepeatStickerFinishWeight(StickerFinish.Holo)
-    > RandomizerAssets.GetFourRepeatStickerFinishWeight(StickerFinish.Paper),
+Assert(defaultConfig.Weights.GetStickerFinishWeight(StickerFinish.Holo, true, true)
+    > defaultConfig.Weights.GetStickerFinishWeight(StickerFinish.Paper, true, true),
     "repeated four-sticker crafts favor Holo");
-Assert(RandomizerAssets.GetFourMixedStickerFinishWeight(StickerFinish.Gold)
-    > RandomizerAssets.GetFourMixedStickerFinishWeight(StickerFinish.Paper),
+Assert(defaultConfig.Weights.GetStickerFinishWeight(StickerFinish.Gold, true, false)
+    > defaultConfig.Weights.GetStickerFinishWeight(StickerFinish.Paper, true, false),
     "mixed four-sticker crafts favor Gold");
 Assert(fourRepeatFinishCounts.GetValueOrDefault(StickerFinish.Holo) > 0
     && fourRepeatFinishCounts.GetValueOrDefault(StickerFinish.Gold) > 0

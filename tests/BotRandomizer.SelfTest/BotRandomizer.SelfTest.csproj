@@ -16,6 +16,7 @@
     <Compile Include="..\..\Cosmetics\CosmeticModels.cs" Link="Cosmetics\CosmeticModels.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticRoller.cs" Link="Cosmetics\CosmeticRoller.cs" />
     <Compile Include="..\..\Cosmetics\RandomizerAssets.cs" Link="Cosmetics\RandomizerAssets.cs" />
+    <Compile Include="..\..\Cosmetics\RandomizerConfig.cs" Link="Cosmetics\RandomizerConfig.cs" />
     <Compile Include="..\..\Cosmetics\WeaponWearAllocator.cs" Link="Cosmetics\WeaponWearAllocator.cs" />
   </ItemGroup>
 

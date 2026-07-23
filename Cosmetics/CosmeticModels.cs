@@ -120,4 +120,16 @@ internal sealed class RandomizerOptions
     public bool Music { get; set; } = true;
     public bool Stickers { get; set; } = true;
     public bool Charms { get; set; } = true;
+
+    internal void CopyFrom(RandomizerOptions source)
+    {
+        Enabled = source.Enabled;
+        Weapons = source.Weapons;
+        Knives = source.Knives;
+        Gloves = source.Gloves;
+        Agents = source.Agents;
+        Music = source.Music;
+        Stickers = source.Stickers;
+        Charms = source.Charms;
+    }
 }

@@ -24,67 +24,6 @@ internal static class RandomizerAssets
         new(519, 2)  // Ursus
     ];
 
-    // Relative per-finish weights. This gently favors the two dominant pro-demo
-    // families without reproducing the corpus's extreme 55% Sport Gloves share.
-    internal static int GetGloveVariantWeight(ushort defIndex)
-        => defIndex switch
-        {
-            5030 => 4, // Sport Gloves: 2x baseline
-            5034 => 3, // Specialist Gloves: 1.5x baseline
-            _ => 2
-        };
-
-    internal static int GetWeaponRarityWeight(CosmeticRarity rarity)
-        => rarity switch
-        {
-            CosmeticRarity.Consumer => 1,
-            CosmeticRarity.Industrial => 3,
-            CosmeticRarity.MilSpec => 10,
-            CosmeticRarity.Restricted => 22,
-            CosmeticRarity.Classified => 23,
-            CosmeticRarity.Covert => 40,
-            CosmeticRarity.Contraband => 1,
-            _ => throw new ArgumentOutOfRangeException(nameof(rarity))
-        };
-
-    internal static int GetStickerFinishWeight(StickerFinish finish)
-        => finish switch
-        {
-            StickerFinish.Paper => 43,
-            StickerFinish.Glitter => 8,
-            StickerFinish.Holo => 28,
-            StickerFinish.Foil => 9,
-            StickerFinish.Gold => 11,
-            StickerFinish.Lenticular => 1,
-            _ => throw new ArgumentOutOfRangeException(nameof(finish))
-        };
-
-    // Four-sticker crafts in the demo corpus were frequently deliberate
-    // four-of-a-kind Holo/Gold arrangements rather than arbitrary mixes.
-    internal static int GetFourRepeatStickerFinishWeight(StickerFinish finish)
-        => finish switch
-        {
-            StickerFinish.Paper => 31,
-            StickerFinish.Glitter => 11,
-            StickerFinish.Holo => 40,
-            StickerFinish.Foil => 7,
-            StickerFinish.Gold => 11,
-            StickerFinish.Lenticular => 1,
-            _ => throw new ArgumentOutOfRangeException(nameof(finish))
-        };
-
-    internal static int GetFourMixedStickerFinishWeight(StickerFinish finish)
-        => finish switch
-        {
-            StickerFinish.Paper => 31,
-            StickerFinish.Glitter => 5,
-            StickerFinish.Holo => 22,
-            StickerFinish.Foil => 8,
-            StickerFinish.Gold => 34,
-            StickerFinish.Lenticular => 1,
-            _ => throw new ArgumentOutOfRangeException(nameof(finish))
-        };
-
     internal static readonly IReadOnlyDictionary<string, ushort> KnifeDefIndexByName =
         new Dictionary<string, ushort>
         {

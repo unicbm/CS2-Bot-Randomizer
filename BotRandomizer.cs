@@ -22,6 +22,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private readonly CosmeticStateStore _states = new();
     private readonly CosmeticOwnershipService _ownership = new();
     private readonly RandomizerOptions _options = new();
+    private readonly HashSet<int> _pendingRerolls = [];
 
     private CosmeticCatalog? _catalog;
     private CosmeticRoller? _roller;
@@ -52,6 +53,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterListener<Listeners.OnClientDisconnect>(OnClientDisconnect);
+        RegisterEventHandler<EventRoundPrestart>(OnRoundPrestart, HookMode.Pre);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventRoundMvp>(OnRoundMvp, HookMode.Pre);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
@@ -155,6 +157,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private void OnMapStart(string mapName)
     {
         _states.Reset();
+        _pendingRerolls.Clear();
         _ownership.Reset();
         _roller?.ResetMap();
         // Keep constructed item-view storage alive across map transitions. Each view is
@@ -169,13 +172,22 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private void OnClientDisconnect(int playerSlot)
     {
         _states.Remove(playerSlot);
+        _pendingRerolls.Remove(playerSlot);
         _ownership.ReleaseSlot(playerSlot);
         _weaponItemViews?.ClearSlot(playerSlot);
         _applicator?.ClearSlot(playerSlot);
     }
 
+    private HookResult OnRoundPrestart(EventRoundPrestart @event, GameEventInfo info)
+    {
+        foreach (var player in Utilities.GetPlayers())
+            ConsumePendingReroll(player);
+        return HookResult.Continue;
+    }
+
     private HookResult OnPlayerSpawn(EventPlayerSpawn @event, GameEventInfo info)
     {
+        ConsumePendingReroll(@event.Userid);
         var state = GetOrCreateState(@event.Userid);
         if (state is null || !_options.Enabled)
             return HookResult.Continue;
@@ -612,7 +624,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
             RestoreAllBots(scope);
     }
 
-    [ConsoleCommand("br_reroll", "Queue new loadouts for dead bots at next spawn")]
+    [ConsoleCommand("br_reroll", "Queue new loadouts for the next safe spawn")]
     [RequiresPermissions("@css/cvar")]
     public void OnRerollCommand(CCSPlayerController? player, CommandInfo command)
     {
@@ -648,27 +660,11 @@ public sealed class BotRandomizerPlugin : BasePlugin
             return;
         }
 
-        if (bots.Any(bot => bot.PawnIsAlive))
-        {
-            command.ReplyToCommand(
-                "Reroll refused: every target bot must be dead. No loadouts changed.");
-            return;
-        }
-
         foreach (var bot in bots)
-        {
-            var userId = bot.UserId!.Value;
-            var team = (byte)bot.TeamNum;
-            _states.Reroll(
-                bot.Slot,
-                userId,
-                team,
-                preserveMusic: false,
-                music => _roller.RollLoadout(team, music));
-        }
+            _pendingRerolls.Add(bot.Slot);
 
         command.ReplyToCommand(
-            $"Queued {bots.Length} bot loadout(s) for next spawn.");
+            $"Queued {bots.Length} bot loadout(s) for the next safe spawn.");
     }
 
     [ConsoleCommand("br_ownership", "Show active cosmetic ownership leases")]
@@ -699,6 +695,26 @@ public sealed class BotRandomizerPlugin : BasePlugin
             _applicator?.ClearSlot(state.Slot);
         }
         return scope;
+    }
+
+    private void ConsumePendingReroll(CCSPlayerController? player)
+    {
+        if (_roller is null
+            || player is not { IsValid: true, IsBot: true, IsHLTV: false }
+            || player.UserId is not int userId
+            || !IsPlayableTeam(player.TeamNum)
+            || !_pendingRerolls.Remove(player.Slot))
+        {
+            return;
+        }
+
+        var team = (byte)player.TeamNum;
+        _states.Reroll(
+            player.Slot,
+            userId,
+            team,
+            preserveMusic: false,
+            music => _roller.RollLoadout(team, music));
     }
 
     private static bool IsPlayableTeam(int team)

@@ -612,7 +612,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
             RestoreAllBots(scope);
     }
 
-    [ConsoleCommand("br_reroll", "Reroll all bots or one bot slot")]
+    [ConsoleCommand("br_reroll", "Queue new loadouts for dead bots at next spawn")]
     [RequiresPermissions("@css/cvar")]
     public void OnRerollCommand(CCSPlayerController? player, CommandInfo command)
     {
@@ -623,17 +623,41 @@ public sealed class BotRandomizerPlugin : BasePlugin
         }
 
         var target = command.ArgCount >= 2 ? command.GetArg(1) : "all";
-        var rerolled = 0;
-        foreach (var bot in Utilities.GetPlayers())
+        int? targetSlot = null;
+        if (target != "all")
         {
-            if (bot is not { IsValid: true, IsBot: true, IsHLTV: false }
-                || bot.UserId is not int userId
-                || !IsPlayableTeam(bot.TeamNum)
-                || (target != "all" && (!int.TryParse(target, out var slot) || bot.Slot != slot)))
+            if (!int.TryParse(target, out var slot))
             {
-                continue;
+                command.ReplyToCommand("Usage: br_reroll [all|bot slot]");
+                return;
             }
+            targetSlot = slot;
+        }
 
+        var bots = Utilities.GetPlayers()
+            .Where(bot =>
+                bot is { IsValid: true, IsBot: true, IsHLTV: false }
+                && bot.UserId is not null
+                && IsPlayableTeam(bot.TeamNum)
+                && (targetSlot is null || bot.Slot == targetSlot.Value))
+            .ToArray();
+
+        if (bots.Length == 0)
+        {
+            command.ReplyToCommand("No matching bot slots.");
+            return;
+        }
+
+        if (bots.Any(bot => bot.PawnIsAlive))
+        {
+            command.ReplyToCommand(
+                "Reroll refused: every target bot must be dead. No loadouts changed.");
+            return;
+        }
+
+        foreach (var bot in bots)
+        {
+            var userId = bot.UserId!.Value;
             var team = (byte)bot.TeamNum;
             _states.Reroll(
                 bot.Slot,
@@ -641,11 +665,10 @@ public sealed class BotRandomizerPlugin : BasePlugin
                 team,
                 preserveMusic: false,
                 music => _roller.RollLoadout(team, music));
-            RestoreBot(bot.Slot, CosmeticScope.All);
-            rerolled++;
         }
 
-        command.ReplyToCommand($"Rerolled {rerolled} bot loadout(s).");
+        command.ReplyToCommand(
+            $"Queued {bots.Length} bot loadout(s) for next spawn.");
     }
 
     [ConsoleCommand("br_ownership", "Show active cosmetic ownership leases")]

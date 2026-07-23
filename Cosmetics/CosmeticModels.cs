@@ -1,5 +1,17 @@
 namespace BotRandomizer;
 
+[Flags]
+internal enum CosmeticScope
+{
+    None = 0,
+    Weapons = 1 << 0,
+    Knife = 1 << 1,
+    Gloves = 1 << 2,
+    Agent = 1 << 3,
+    MusicKit = 1 << 4,
+    All = Weapons | Knife | Gloves | Agent | MusicKit
+}
+
 internal enum CosmeticRarity
 {
     Consumer,

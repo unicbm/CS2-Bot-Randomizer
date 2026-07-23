@@ -13,13 +13,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="BotRandomizer.API\BotRandomizer.API.csproj">
-      <Private>false</Private>
-    </ProjectReference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="BotRandomizer.API\**\*.cs" />
     <Compile Remove="tests\**\*.cs" />
   </ItemGroup>
 

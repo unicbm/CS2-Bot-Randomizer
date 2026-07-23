@@ -9,13 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\BotRandomizer.API\BotRandomizer.API.csproj" />
     <Compile Include="..\..\Cosmetics\AttributeEncoding.cs" Link="Cosmetics\AttributeEncoding.cs" />
     <Compile Include="..\..\Cosmetics\CharmPlacementCatalog.cs" Link="Cosmetics\CharmPlacementCatalog.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticCatalog.cs" Link="Cosmetics\CosmeticCatalog.cs" />
     <Compile Include="..\..\Cosmetics\EconItemIdAllocator.cs" Link="Cosmetics\EconItemIdAllocator.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticModels.cs" Link="Cosmetics\CosmeticModels.cs" />
-    <Compile Include="..\..\Cosmetics\CosmeticOwnershipService.cs" Link="Cosmetics\CosmeticOwnershipService.cs" />
     <Compile Include="..\..\Cosmetics\CosmeticRoller.cs" Link="Cosmetics\CosmeticRoller.cs" />
     <Compile Include="..\..\Cosmetics\RandomizerAssets.cs" Link="Cosmetics\RandomizerAssets.cs" />
     <Compile Include="..\..\Cosmetics\WeaponWearAllocator.cs" Link="Cosmetics\WeaponWearAllocator.cs" />

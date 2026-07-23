@@ -1,5 +1,4 @@
 using BotRandomizer;
-using BotRandomizer.API;
 
 if (args.Length != 1)
     throw new InvalidOperationException("Pass the absolute path to cosmetic_catalog.json.");
@@ -169,7 +168,9 @@ for (var iteration = 0; iteration < 2000; iteration++)
         ? weaponCatalog.LegacyStickerSchemaCount
         : weaponCatalog.StickerSchemaCount;
 
-    Assert(weapon.Stickers.Count <= 5, "sticker stack limit");
+    Assert(weapon.Stickers.Count <= schemaCount, "sticker stack respects weapon schema");
+    Assert(weapon.Stickers.Select(sticker => sticker.Schema).Distinct().Count()
+        == weapon.Stickers.Count, "sticker schemas do not overlap");
     for (var slot = 0; slot < weapon.Stickers.Count; slot++)
     {
         var sticker = weapon.Stickers[slot];
@@ -267,8 +268,7 @@ var expectedStickerCounts = new Dictionary<int, double>
     [1] = 0.12,
     [2] = 0.08,
     [3] = 0.08,
-    [4] = 0.25,
-    [5] = 0.12
+    [4] = 0.37
 };
 foreach (var (count, expected) in expectedStickerCounts)
 {
@@ -279,8 +279,7 @@ var expectedRepeatShares = new Dictionary<int, double>
 {
     [2] = 0.25,
     [3] = 0.28,
-    [4] = 0.41,
-    [5] = 0.21
+    [4] = 0.41
 };
 foreach (var (count, expected) in expectedRepeatShares)
 {
@@ -330,25 +329,6 @@ for (var iteration = 0; iteration < 100; iteration++)
     break;
 }
 Assert(sawDefaultPlacementCharm, "unobserved weapon charm rolling exercised");
-
-var now = new DateTimeOffset(2026, 7, 19, 0, 0, 0, TimeSpan.Zero);
-using var ownership = new CosmeticOwnershipService(() => now);
-var ownershipChanges = new List<OwnershipChange>();
-ownership.Changed += ownershipChanges.Add;
-var lease = ownership.AcquireLease(
-    "SelfTest",
-    3,
-    CosmeticScope.Weapons | CosmeticScope.Knife,
-    CosmeticLeasePurpose.Replay,
-    ttlSeconds: 5);
-Assert(lease.Acquired, "lease acquisition");
-Assert(!ownership.CanWrite(3, CosmeticScope.Weapons), "leased weapon scope is blocked");
-Assert(ownership.CanWrite(3, CosmeticScope.Agent), "unleased agent scope remains writable");
-Assert(ownership.RenewLease("SelfTest", 3, lease.LeaseId, 5), "lease renewal");
-now = now.AddSeconds(6);
-ownership.CleanupExpired();
-Assert(ownership.CanWrite(3, CosmeticScope.Weapons), "expired lease restores writes");
-Assert(ownershipChanges.Any(change => change.Kind == OwnershipChangeKind.Expired), "expiry notification");
 
 Console.WriteLine("BotRandomizer self-test passed.");
 

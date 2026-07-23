@@ -53,10 +53,7 @@ charm.
   already been installed.
 - Per-slot callbacks capture both the user ID and loadout generation. Stale
   callbacks cannot write after a team change, reroll, disconnect, slot reuse,
-  or external ownership handoff.
-- `BotRandomizer.API` exposes expiring per-slot, per-scope leases for replay or
-  override plugins. Releasing a lease restores the frozen random baseline by
-  default.
+  or map transition.
 
 The runtime catalog records the parser hash and demo-corpus digest used to
 derive its compact knife preferences.
@@ -95,33 +92,9 @@ derive its compact knife preferences.
 br_status
 br_set <enabled|weapons|knives|gloves|agents|music|stickers|charms> <on|off>
 br_reroll [all|slot]
-br_ownership
 ```
 
-Changing settings, rerolling, and viewing ownership require `@css/cvar`.
-`br_status` is read-only.
-
-## Optional ownership API
-
-The capability name is:
-
-```text
-botrandomizer:cosmetic_ownership:v1
-```
-
-Consumers compile against `BotRandomizer.API.dll` and acquire a short-lived
-lease for the exact bot slot and scopes they will write. Active replay code
-must renew the lease; expired leases are reclaimed automatically. Consumers
-should release with `RestoreBaseline` during normal stop/handoff and unload.
-
-For CounterStrikeSharp shared-type identity, install the contract assembly at:
-
-```text
-addons/counterstrikesharp/shared/BotRandomizer.API/BotRandomizer.API.dll
-```
-
-Do not ship private, differing copies of the contract assembly in multiple
-plugin directories.
+Changing settings and rerolling require `@css/cvar`. `br_status` is read-only.
 
 ## Build and validate
 
@@ -138,7 +111,7 @@ guns), compact weighted distributions, integer attribute bit encoding, process-u
 custom item IDs, sticker schema bounds, Sticker Slab payloads, keychain seed
 bounds, demo-observed weapon-specific charm placement, 70% charm probability,
 wear-cache isolation, the 70/30 knife-type split, coherent Holo/Gold
-four-sticker themes, and ownership lease expiry.
+four-sticker themes, and non-overlapping weapon sticker schemas.
 
 ## Rebuild professional demo evidence
 
@@ -208,10 +181,9 @@ observation counts remain in the input evidence reports.
 2. Place `BotRandomizer.dll`, `cosmetic_catalog.json`, and
    `charm_placements.json` under
    `addons/counterstrikesharp/plugins/BotRandomizer/`.
-3. Place `BotRandomizer.API.dll` in the shared path shown above.
-4. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
+3. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
    `configs/core.json`.
-5. Restart the server and check `br_status` before enabling another cosmetic
+4. Restart the server and check `br_status` before enabling another cosmetic
    writer.
 
 ## Credits and licensing

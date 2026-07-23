@@ -107,15 +107,17 @@ internal sealed class CosmeticRoller
             return Array.Empty<StickerSelection>();
 
         var category = PickStickerCategory();
-        var count = craftRoll < SingleStickerCraftThreshold
-            ? 1
-            : craftRoll < PairCraftThreshold
-                ? 2
-                : craftRoll < ThreeStickerCraftThreshold
-                    ? 3
-                    : craftRoll < FourStickerCraftThreshold
-                        ? 4
-                        : 5;
+        var count = Math.Min(
+            craftRoll < SingleStickerCraftThreshold
+                ? 1
+                : craftRoll < PairCraftThreshold
+                    ? 2
+                    : craftRoll < ThreeStickerCraftThreshold
+                        ? 3
+                        : craftRoll < FourStickerCraftThreshold
+                            ? 4
+                            : 5,
+            schemaCount);
         var repeated = count == 1 || _random.Next(100) < GetRepeatChance(count);
         if (!repeated && category.Count < count)
             category = PickStickerCategory(count);
@@ -126,8 +128,7 @@ internal sealed class CosmeticRoller
         {
             return RepeatSticker(
                 PickSticker(craftPool),
-                count,
-                schemaCount);
+                count);
         }
 
         var selections = new StickerSelection[count];
@@ -139,27 +140,25 @@ internal sealed class CosmeticRoller
                 .ToArray();
             var sticker = PickSticker(candidates.Length > 0 ? candidates : craftPool);
             used.Add(sticker.DefIndex);
-            selections[slot] = CreateSticker(sticker, slot, schemaCount);
+            selections[slot] = CreateSticker(sticker, slot);
         }
         return selections;
     }
 
     private IReadOnlyList<StickerSelection> RepeatSticker(
         StickerCatalogEntry sticker,
-        int count,
-        int schemaCount)
+        int count)
     {
         var selections = new StickerSelection[count];
         for (var slot = 0; slot < count; slot++)
-            selections[slot] = CreateSticker(sticker, slot, schemaCount);
+            selections[slot] = CreateSticker(sticker, slot);
         return selections;
     }
 
     private static StickerSelection CreateSticker(
         StickerCatalogEntry sticker,
-        int slot,
-        int schemaCount)
-        => new(sticker.DefIndex, slot, (uint)(slot % schemaCount));
+        int slot)
+        => new(sticker.DefIndex, slot, (uint)slot);
 
     private IReadOnlyList<StickerCatalogEntry> PickStickerCategory(int minimumCount = 1)
         => PickWeighted(

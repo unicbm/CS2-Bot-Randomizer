@@ -258,7 +258,10 @@ internal sealed class CosmeticApplicator
         int WearBits)
     {
         internal static KnifeCosmeticFingerprint From(KnifeSelection selection)
-            => new(selection.DefIndex, selection.PaintKit, BitConverter.SingleToInt32Bits(selection.Wear));
+            => new(
+                selection.DefIndex,
+                selection.PaintKit,
+                BitConverter.SingleToInt32Bits(selection.Wear));
     }
 
     private readonly record struct GloveCosmeticFingerprint(
@@ -267,7 +270,10 @@ internal sealed class CosmeticApplicator
         int WearBits)
     {
         internal static GloveCosmeticFingerprint From(GloveSelection selection)
-            => new(selection.DefIndex, selection.PaintKit, BitConverter.SingleToInt32Bits(selection.Wear));
+            => new(
+                selection.DefIndex,
+                selection.PaintKit,
+                BitConverter.SingleToInt32Bits(selection.Wear));
     }
 
     private readonly record struct AppliedKnifeCosmetic(

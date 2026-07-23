@@ -8,6 +8,26 @@ charm.
 
 - Weapon paints, knife paints, gloves, stickers, charms, model-specific sticker
   schemas, and wear ranges come from the bundled `cosmetic_catalog.json`.
+- Professional demos are used offline to derive a small set of general
+  preferences. Exact player inventories and weapon templates are not shipped or
+  looked up at runtime.
+- Weapon skins and stickers are always sampled from the complete current
+  `cs2-lib` catalog. Cosmetics introduced after the demo corpus was recorded
+  therefore remain reachable without a special fallback lane.
+- The compact preferences cover weapon rarity, glove family, knife finish,
+  sticker count, repeated-design probability, and sticker finish. They are
+  ordinary integer weights in the randomizer rather than a large runtime table.
+- Karambit, M9 Bayonet, Butterfly Knife, and Bayonet hold 70% of knife-type
+  probability together. The remaining 30% favors other types seen on at least
+  seven distinct owners in the reviewed demos, plus a 3% Classic Knife
+  maintainer preference; one-off and near-one-off types are excluded.
+- The observed sticker-count distribution is approximately 35% clean, 12%
+  single, 8% pair, 8% triple, 25% four-sticker, and 12% five-sticker.
+- Four-sticker crafts choose one finish theme for the whole craft. Repeated
+  four-of-a-kind crafts favor Holo; non-repeated themed fours favor Gold, with
+  Holo and Paper still common. This avoids independent per-slot "slot machine"
+  results while continuing to use new sticker definitions.
+- Charms deliberately remain independent and random.
 - Charm offsets come from the bundled `charm_placements.json`. Its positions
   were observed in parsed CS2 demos and are grouped by the weapon definition;
   positions are never shared between different weapon models.
@@ -38,9 +58,8 @@ charm.
   override plugins. Releasing a lease restores the frozen random baseline by
   default.
 
-The plugin deliberately keeps the original, verified four-knife subclass set.
-The larger catalog is used to select only paints valid for the selected weapon,
-knife, or glove definition; it does not guess IDs from numeric ranges.
+The runtime catalog records the parser hash and demo-corpus digest used to
+derive its compact knife preferences.
 
 ## Runtime behavior
 
@@ -50,8 +69,16 @@ knife, or glove definition; it does not guess IDs from numeric ranges.
   `GiveNamedItem` pre-hook. Only the constructed item view's
   `NetworkedDynamicAttributes` list is populated; no live-weapon attribute list
   is cleared or rewritten afterward.
-- A weapon receives `0..5` stickers. Sticker slots are contiguous and each
-  schema index is constrained to the selected paint's actual HD/legacy model.
+- Every weapon skin and sticker roll uses the current full catalog, with compact
+  demo-derived weights applied to families and craft shapes.
+- Knife type uses a ten-entry, 100-point weight list. Its selected finish is
+  then weighted independently from demo evidence and resolved only against
+  paints valid for that knife.
+- Sticker crafts stay within one semantic category. Four-sticker crafts also
+  stay within one finish theme, and may repeat one exact design according to
+  the observed repeat rate.
+- A small wear-value reservation preserves each selected craft while preventing
+  the CS2 client material cache from displaying another bot's stickers.
 - A weapon has a 70% chance to receive one charm in keychain slot `0`.
 - For a weapon covered by `charm_placements.json`, the charm receives one
   uniformly selected, demo-observed position for that exact weapon definition.
@@ -105,26 +132,60 @@ C:\Users\Uni\.dotnet\dotnet.exe run `
   -c Release -- cosmetic_catalog.json
 ```
 
-The self-test validates catalog counts and provenance, exact designer-name to
-definition-index mappings (including BotBuy's CT replacement guns), integer
-attribute bit encoding, process-unique custom item IDs, sticker schema bounds,
-Sticker Slab payloads, keychain seed bounds, demo-observed weapon-specific
-charm placement, 70% charm probability, wear-cache isolation, and ownership
-lease expiry.
+The self-test validates catalog counts and provenance, exact
+designer-name to definition-index mappings (including BotBuy's CT replacement
+guns), compact weighted distributions, integer attribute bit encoding, process-unique
+custom item IDs, sticker schema bounds, Sticker Slab payloads, keychain seed
+bounds, demo-observed weapon-specific charm placement, 70% charm probability,
+wear-cache isolation, the 70/30 knife-type split, coherent Holo/Gold
+four-sticker themes, and ownership lease expiry.
 
-## Refresh the catalog
+## Rebuild professional demo evidence
+
+Build `cs2-demotracer` in release mode, then point the resumable extractor at a
+directory tree containing `.dem` files:
+
+```powershell
+node tools\build-pro-loadout-catalog.mjs `
+  --demo-root C:\path\to\demos `
+  --converter C:\path\to\cs2-demotracer.exe `
+  --output .cache\pro-loadout-evidence.json `
+  --report .cache\pro-loadout-report.json `
+  --cache-dir .cache\pro-loadout-catalog `
+  --workers 3
+```
+
+The extractor invokes the parser's opt-in cosmetic and sticker export with the
+required acknowledgements, handles segmented `-pN.dem` files independently,
+and caches one privacy-reduced evidence record per source file. Interrupted
+runs resume from that cache; changed demos and a changed parser executable
+invalidate the relevant records. The report may retain relative failure paths
+for diagnostics. The evidence and report are offline analysis artifacts; the
+plugin does not load or ship either file.
+
+Add `--cached-only` to rebuild a catalog from the currently valid cache without
+parsing any remaining demo files. This is useful for freezing a reviewed
+partial corpus before later adding a small curated batch.
+
+## Refresh the canonical cosmetic catalog
 
 Clone a reviewed `ianlucas/cs2-lib` revision, then run:
 
 ```powershell
 node tools\generate-cosmetic-catalog.mjs `
   C:\path\to\cs2-lib\src\items.ts `
+  C:\path\to\cs2-lib\scripts\data\english.json `
+  .cache\pro-loadout-evidence.json `
   cosmetic_catalog.json `
   <full-40-character-cs2-lib-commit>
 ```
 
-Review the generated diff and run the self-test before publishing. The plugin
-never downloads or mutates the catalog at runtime.
+The English metadata supplies stable sticker categories and finish names.
+Observed knife finishes are joined directly by `(definition index, paint kit)`;
+localized names are not used as keys. The generator reduces the offline evidence
+to compact finish weights and provenance inside `cosmetic_catalog.json`. Review
+the generated catalog and run the self-test before publishing. The plugin never
+downloads or mutates it at runtime.
 
 To rebuild weapon-coupled charm positions from one or more reviewed
 `cs2-demotracer` evidence reports:

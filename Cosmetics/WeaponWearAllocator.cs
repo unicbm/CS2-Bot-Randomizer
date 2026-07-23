@@ -19,7 +19,6 @@ internal sealed class WeaponWearAllocator
 
         var preferredTick = Math.Clamp(10, minimumTick, maximumTick);
         var signature = BuildStickerSignature(stickers);
-
         for (var tick = preferredTick; tick <= maximumTick; tick++)
         {
             if (TryReserve(defIndex, paint.PaintKit, tick, signature))

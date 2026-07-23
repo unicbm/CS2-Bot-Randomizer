@@ -204,8 +204,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
             var designerName = hook.GetParam<string>(1);
             if (string.IsNullOrWhiteSpace(designerName))
                 return HookResult.Continue;
-            if (hook.GetParam<nint>(3) != nint.Zero)
-                return HookResult.Continue;
 
             var player = GetPlayerFromItemServices(itemServices);
             if (player is null)

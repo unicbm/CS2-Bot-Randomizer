@@ -61,46 +61,55 @@ internal sealed class CosmeticApplicator
             if (weapons is null)
                 return;
 
+            var fingerprint = KnifeCosmeticFingerprint.From(selection);
             foreach (var handle in weapons)
             {
                 var weapon = handle.Value;
                 if (weapon is not { IsValid: true })
                     continue;
-                if (weapon.DesignerName is not ("weapon_knife" or "weapon_knife_t"))
-                    continue;
 
                 var item = weapon.AttributeManager?.Item;
                 if (item is null)
-                    return;
+                    continue;
 
-                var fingerprint = KnifeCosmeticFingerprint.From(selection);
-                if (_appliedKnives.TryGetValue(player.Slot, out var applied)
+                var isDefaultKnife = weapon.DesignerName is "weapon_knife" or "weapon_knife_t";
+                var isAppliedEntity = _appliedKnives.TryGetValue(player.Slot, out var applied)
                     && applied.PawnHandle == pawn.EntityHandle.Raw
                     && applied.WeaponHandle == weapon.EntityHandle.Raw
-                    && applied.Fingerprint == fingerprint
-                    && item.ItemID == applied.ItemId
-                    && item.ItemDefinitionIndex == selection.DefIndex)
-                {
-                    return;
-                }
+                    && applied.Fingerprint == fingerprint;
+                var isPreparedEntity = item.ItemDefinitionIndex == selection.DefIndex
+                    && EconItemIdAllocator.IsAllocated(item.ItemID);
+                if (!isDefaultKnife && !isAppliedEntity && !isPreparedEntity)
+                    continue;
 
+                var econIsCurrent = item.ItemDefinitionIndex == selection.DefIndex
+                    && (isPreparedEntity || isAppliedEntity && item.ItemID == applied.ItemId);
+
+                // ChangeSubclass may be ignored while the fresh knife entity is still
+                // settling. Reassert it on the scheduled passes even when econ metadata
+                // is already current so model and animations cannot remain stale.
                 weapon.AcceptInput("ChangeSubclass", value: selection.DefIndex.ToString());
                 item.ItemDefinitionIndex = selection.DefIndex;
                 item.EntityQuality = 3;
                 if (_setAttributeByName is not null)
                 {
-                    item.AttributeList.Attributes.RemoveAll();
-                    item.NetworkedDynamicAttributes.Attributes.RemoveAll();
-                    AssignItemId(item);
+                    if (!econIsCurrent)
+                    {
+                        item.AttributeList.Attributes.RemoveAll();
+                        item.NetworkedDynamicAttributes.Attributes.RemoveAll();
+                        item.AccountID = AccountIdFromSteamId(player.SteamID);
+                        AssignItemId(item);
+                        SetTextureAttributes(
+                            item.NetworkedDynamicAttributes,
+                            item.AttributeList,
+                            selection.PaintKit,
+                            0,
+                            selection.Wear);
+                    }
                     weapon.FallbackPaintKit = selection.PaintKit;
                     weapon.FallbackSeed = 0;
                     weapon.FallbackWear = selection.Wear;
-                    SetTextureAttributes(
-                        item.NetworkedDynamicAttributes,
-                        item.AttributeList,
-                        selection.PaintKit,
-                        0,
-                        selection.Wear);
+                    MarkWeaponPaintStateChanged(weapon);
                 }
                 Utilities.SetStateChanged(weapon, "CEconEntity", "m_AttributeManager");
                 _appliedKnives[player.Slot] = new AppliedKnifeCosmetic(
@@ -225,6 +234,13 @@ internal sealed class CosmeticApplicator
         SetAttribute(attributeList, "set item texture prefab", paintKit);
         SetAttribute(attributeList, "set item texture seed", seed);
         SetAttribute(attributeList, "set item texture wear", wear);
+    }
+
+    private static void MarkWeaponPaintStateChanged(CBasePlayerWeapon weapon)
+    {
+        Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackPaintKit");
+        Utilities.SetStateChanged(weapon, "CEconEntity", "m_nFallbackSeed");
+        Utilities.SetStateChanged(weapon, "CEconEntity", "m_flFallbackWear");
     }
 
     private void SetAttribute(CAttributeList attributes, string name, float value)

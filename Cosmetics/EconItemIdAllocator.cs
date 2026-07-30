@@ -7,4 +7,7 @@ internal static class EconItemIdAllocator
 
     internal static ulong Next()
         => unchecked(_nextItemId++);
+
+    internal static bool IsAllocated(ulong itemId)
+        => itemId >= MinimumCustomItemId && itemId < _nextItemId;
 }

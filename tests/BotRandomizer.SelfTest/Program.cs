@@ -135,6 +135,9 @@ Assert(BitConverter.SingleToInt32Bits(AttributeEncoding.Int32BitsToSingle(-12345
     == -1234567, "int attribute bit encoding");
 var itemIds = Enumerable.Range(0, 32).Select(_ => EconItemIdAllocator.Next()).ToArray();
 Assert(itemIds.Distinct().Count() == itemIds.Length, "custom item IDs are process-unique");
+Assert(itemIds.All(EconItemIdAllocator.IsAllocated)
+    && !EconItemIdAllocator.IsAllocated(0),
+    "custom item IDs identify prebuilt economic views");
 
 var wearAllocator = new WeaponWearAllocator();
 var paint = new PaintCatalogEntry(7, CosmeticRarity.Restricted, false, 0.0f, 1.0f);
@@ -329,6 +332,114 @@ for (var iteration = 0; iteration < 100; iteration++)
     break;
 }
 Assert(sawDefaultPlacementCharm, "unobserved weapon charm rolling exercised");
+
+var stateStore = new CosmeticStateStore();
+var firstState = stateStore.GetOrCreate(
+    slot: 5,
+    userId: 101,
+    RandomizerAssets.TerroristTeam,
+    music => roller.RollLoadout(RandomizerAssets.TerroristTeam, music));
+var firstIncarnation = firstState.Incarnation;
+var rerolledState = stateStore.Reroll(
+    slot: 5,
+    userId: 101,
+    RandomizerAssets.TerroristTeam,
+    preserveMusic: false,
+    music => roller.RollLoadout(RandomizerAssets.TerroristTeam, music));
+Assert(rerolledState?.Incarnation == firstIncarnation,
+    "reroll preserves managed bot incarnation");
+stateStore.Remove(5);
+var reusedSlotState = stateStore.GetOrCreate(
+    slot: 5,
+    userId: 202,
+    RandomizerAssets.CounterTerroristTeam,
+    music => roller.RollLoadout(RandomizerAssets.CounterTerroristTeam, music));
+Assert(reusedSlotState.Incarnation != firstIncarnation,
+    "slot reuse receives a new managed bot incarnation");
+
+long leaseClock = 1_000;
+var leaseStore = new CosmeticWriteLeaseStore("self-test", () => leaseClock);
+var demoTracerPolicy = new CosmeticWritePolicy(
+    agent: false,
+    knife: true,
+    gloves: false,
+    musicKit: false,
+    new Dictionary<ushort, WeaponWritePolicy>
+    {
+        [7] = new(
+            Paint: true,
+            Stickers: true,
+            Keychain: false,
+            PaintUsesLegacyModel: false)
+    });
+var demoTracerClaims = new Dictionary<int, LeasedCosmeticWriteClaim>
+{
+    [1] = new(11, 76_561_198_000_000_001UL, demoTracerPolicy)
+};
+Assert(leaseStore.TryAcquire(
+        "demotracer",
+        demoTracerClaims,
+        out var demoTracerLease,
+        out var leaseReason)
+    && leaseReason.Length == 0,
+    "evidence writer lease acquisition");
+Assert(leaseStore.TryGetPolicy(1, 11, out var activePolicy, out var activeOwner)
+    && activeOwner == "demotracer"
+    && activePolicy.Knife
+    && !activePolicy.Gloves
+    && activePolicy.TryGetWeapon(7, out var akPolicy)
+    && akPolicy.Paint
+    && akPolicy.Stickers
+    && !akPolicy.Keychain,
+    "positive evidence claims only owned fields");
+Assert(!leaseStore.TryGetPolicy(1, 12, out _, out _),
+    "stale pawn incarnation cannot use lease");
+Assert(!leaseStore.TryAcquire(
+        "other-writer",
+        demoTracerClaims,
+        out _,
+        out leaseReason)
+    && leaseReason == "slot_leased:1",
+    "lease rejects competing writer");
+
+var replacementPolicy = new CosmeticWritePolicy(
+    agent: true,
+    knife: false,
+    gloves: false,
+    musicKit: false,
+    new Dictionary<ushort, WeaponWritePolicy>());
+var replacementClaims = new Dictionary<int, LeasedCosmeticWriteClaim>
+{
+    [2] = new(22, null, replacementPolicy)
+};
+Assert(leaseStore.TryReplace(
+        demoTracerLease.Token,
+        replacementClaims,
+        out var replacementLease,
+        out var replacedSlots,
+        out leaseReason)
+    && replacedSlots.SequenceEqual(new[] { 1, 2 })
+    && replacementLease.Token == demoTracerLease.Token,
+    "lease replacement is atomic across slots");
+Assert(!leaseStore.TryGetPolicy(1, 11, out _, out _)
+    && leaseStore.TryGetPolicy(2, 22, out var replacementActive, out _)
+    && replacementActive.Agent
+    && !replacementActive.Knife,
+    "lease replacement releases old claims and installs new claims");
+
+leaseClock += 3_999;
+Assert(leaseStore.Heartbeat(replacementLease.Token), "lease heartbeat before timeout");
+leaseClock += 4_001;
+Assert(leaseStore.SweepExpired().SequenceEqual(new[] { 2 })
+    && !leaseStore.TryGetPolicy(2, 22, out _, out _),
+    "expired lease restores randomizer ownership");
+var leaseCounters = leaseStore.GetCounters();
+Assert(leaseCounters.ActiveLeases == 0
+    && leaseCounters.AcquiredLeases == 1
+    && leaseCounters.ReplacedLeases == 1
+    && leaseCounters.ExpiredLeases == 1
+    && leaseCounters.RejectedRequests == 1,
+    "lease diagnostics counters");
 
 Console.WriteLine("BotRandomizer self-test passed.");
 

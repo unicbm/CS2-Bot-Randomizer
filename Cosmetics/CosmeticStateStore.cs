@@ -4,6 +4,7 @@ internal sealed class CosmeticStateStore
 {
     private readonly Dictionary<int, SlotCosmeticState> _states = new();
     private long _nextGeneration = 1;
+    private ulong _nextIncarnation = 1;
 
     internal IReadOnlyCollection<SlotCosmeticState> States => _states.Values;
 
@@ -26,6 +27,7 @@ internal sealed class CosmeticStateStore
         state = new SlotCosmeticState(
             slot,
             userId,
+            NextIncarnation(),
             NextGeneration(),
             loadoutFactory(null));
         _states[slot] = state;
@@ -40,12 +42,21 @@ internal sealed class CosmeticStateStore
         Func<int?, BotCosmeticLoadout> loadoutFactory)
     {
         int? musicKit = null;
+        ulong? incarnation = null;
         if (_states.TryGetValue(slot, out var existing) && existing.UserId == userId && preserveMusic)
+        {
             musicKit = existing.Loadout.MusicKit;
+            incarnation = existing.Incarnation;
+        }
+        else if (existing is not null && existing.UserId == userId)
+        {
+            incarnation = existing.Incarnation;
+        }
 
         var state = new SlotCosmeticState(
             slot,
             userId,
+            incarnation ?? NextIncarnation(),
             NextGeneration(),
             loadoutFactory(musicKit));
         _states[slot] = state;
@@ -82,16 +93,20 @@ internal sealed class CosmeticStateStore
     }
 
     private long NextGeneration() => _nextGeneration++;
+
+    private ulong NextIncarnation() => _nextIncarnation++;
 }
 
 internal sealed class SlotCosmeticState(
     int slot,
     int userId,
+    ulong incarnation,
     long generation,
     BotCosmeticLoadout loadout)
 {
     internal int Slot { get; } = slot;
     internal int UserId { get; } = userId;
+    internal ulong Incarnation { get; } = incarnation;
     internal long Generation { get; set; } = generation;
     internal BotCosmeticLoadout Loadout { get; set; } = loadout;
 }

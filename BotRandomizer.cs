@@ -1,8 +1,9 @@
 using System.Runtime.InteropServices;
+using BotRandomizerApi;
 using CounterStrikeSharp.API;
 using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
-using CounterStrikeSharp.API.Modules.Admin;
+using CounterStrikeSharp.API.Core.Capabilities;
 using CounterStrikeSharp.API.Modules.Commands;
 using CounterStrikeSharp.API.Modules.Memory;
 using CounterStrikeSharp.API.Modules.Memory.DynamicFunctions;
@@ -12,11 +13,16 @@ using Microsoft.Extensions.Logging;
 
 namespace BotRandomizer;
 
-public sealed class BotRandomizerPlugin : BasePlugin
+public sealed partial class BotRandomizerPlugin : BasePlugin
 {
+    private static readonly PluginCapability<IBotRandomizerApi> ApiCapability =
+        new(BotRandomizerContract.Capability);
+
     private readonly CosmeticStateStore _states = new();
-    private readonly RandomizerOptions _options = new();
     private readonly HashSet<int> _pendingRerolls = [];
+    private readonly string _providerEpoch = Guid.NewGuid().ToString("N");
+    private readonly CosmeticWriteLeaseStore _writeLeases;
+    private readonly BotRandomizerApiFacade _apiFacade;
 
     private CosmeticCatalog? _catalog;
     private CosmeticRoller? _roller;
@@ -24,25 +30,37 @@ public sealed class BotRandomizerPlugin : BasePlugin
     private WeaponItemViewStore? _weaponItemViews;
     private bool _giveNamedItemHooked;
     private bool _giveNamedItemErrorLogged;
+    private bool _draining;
+    private ulong _mapEpoch = 1;
+    private long _nextLeaseSweepMilliseconds;
+
+    public BotRandomizerPlugin()
+    {
+        _writeLeases = new CosmeticWriteLeaseStore(_providerEpoch);
+        _apiFacade = new BotRandomizerApiFacade(this);
+    }
 
     public override string ModuleName => "BotRandomizer";
-    public override string ModuleVersion => "1.4.1";
+    public override string ModuleVersion => "1.5.0";
     public override string ModuleAuthor => "ed0ard, Misaka17032 & unicbm";
     public override string ModuleDescription =>
         "Stable per-bot knives, gloves, weapon skins, stickers, charms, agents and music kits";
 
     public override void Load(bool hotReload)
     {
+        _draining = false;
         LoadCatalog();
         LoadAttributeWriter();
 
         RegisterListener<Listeners.OnMapStart>(OnMapStart);
         RegisterListener<Listeners.OnClientDisconnect>(OnClientDisconnect);
+        RegisterListener<Listeners.OnTick>(OnTick);
         RegisterEventHandler<EventRoundPrestart>(OnRoundPrestart, HookMode.Pre);
         RegisterEventHandler<EventPlayerSpawn>(OnPlayerSpawn);
         RegisterEventHandler<EventRoundMvp>(OnRoundMvp, HookMode.Pre);
         RegisterEventHandler<EventPlayerTeam>(OnPlayerTeam);
         RegisterEventHandler<EventItemPickup>(OnItemPickup);
+        Capabilities.RegisterPluginCapability(ApiCapability, () => (IBotRandomizerApi)_apiFacade);
         if (_weaponItemViews?.NativeAvailable == true)
         {
             VirtualFunctions.GiveNamedItemFunc.Hook(OnGiveNamedItemPre, HookMode.Pre);
@@ -55,6 +73,8 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     public override void Unload(bool hotReload)
     {
+        _draining = true;
+        _writeLeases.Reset(countRevocation: true);
         if (_giveNamedItemHooked)
         {
             VirtualFunctions.GiveNamedItemFunc.Unhook(OnGiveNamedItemPre, HookMode.Pre);
@@ -136,6 +156,8 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     private void OnMapStart(string mapName)
     {
+        _mapEpoch++;
+        _writeLeases.Reset(countRevocation: true);
         _states.Reset();
         _pendingRerolls.Clear();
         _roller?.ResetMap();
@@ -150,10 +172,22 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     private void OnClientDisconnect(int playerSlot)
     {
+        if (_writeLeases.RevokeSlot(playerSlot, out var affectedSlots))
+            RefreshLeasePolicySlots(affectedSlots);
         _states.Remove(playerSlot);
         _pendingRerolls.Remove(playerSlot);
         _weaponItemViews?.ClearSlot(playerSlot);
         _applicator?.ClearSlot(playerSlot);
+    }
+
+    private void OnTick()
+    {
+        var now = Environment.TickCount64;
+        if (now < _nextLeaseSweepMilliseconds)
+            return;
+
+        _nextLeaseSweepMilliseconds = now + 1_000;
+        SweepExpiredWriteLeases();
     }
 
     private HookResult OnRoundPrestart(EventRoundPrestart @event, GameEventInfo info)
@@ -167,7 +201,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
     {
         ConsumePendingReroll(@event.Userid);
         var state = GetOrCreateState(@event.Userid);
-        if (state is null || !_options.Enabled)
+        if (state is null)
             return HookResult.Continue;
 
         var slot = state.Slot;
@@ -189,9 +223,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     private HookResult OnGiveNamedItemPre(DynamicHook hook)
     {
-        if (!_options.Enabled
-            || !_options.Weapons
-            || _catalog is null
+        if (_catalog is null
             || _roller is null
             || _weaponItemViews is null)
         {
@@ -210,19 +242,65 @@ public sealed class BotRandomizerPlugin : BasePlugin
                 return HookResult.Continue;
 
             var state = GetOrCreateState(player);
-            if (state is null || !_catalog.TryGetWeapon(designerName, out var weapon))
+            if (state is null)
+                return HookResult.Continue;
+
+            TryGetWritePolicy(state, out var writePolicy);
+            if (designerName is "weapon_knife" or "weapon_knife_t")
+            {
+                if (writePolicy?.Knife != true
+                    && _weaponItemViews.TryPrepareKnife(
+                        state,
+                        state.Loadout.Knife,
+                        player.SteamID,
+                        out var knifeItemViewHandle))
+                {
+                    hook.SetParam(3, knifeItemViewHandle);
+                }
+                return HookResult.Continue;
+            }
+
+            if (!_catalog.TryGetWeapon(designerName, out var weapon))
             {
                 return HookResult.Continue;
             }
 
             var selection = _roller.GetOrCreateWeapon(state.Loadout, weapon.DefIndex);
-            if (selection is not null
+            var includePaint = true;
+            var includeStickers = true;
+            var includeKeychain = true;
+            var stickerSchemaCount = selection?.Legacy == true
+                ? weapon.LegacyStickerSchemaCount
+                : weapon.StickerSchemaCount;
+            if (writePolicy is not null
+                && writePolicy.TryGetWeapon(weapon.DefIndex, out var weaponPolicy))
+            {
+                includePaint = !weaponPolicy.Paint;
+                includeStickers = !weaponPolicy.Stickers;
+                includeKeychain = !weaponPolicy.Keychain;
+                if (weaponPolicy.Paint && includeStickers)
+                {
+                    stickerSchemaCount = weaponPolicy.PaintUsesLegacyModel switch
+                    {
+                        true => weapon.LegacyStickerSchemaCount,
+                        false => weapon.StickerSchemaCount,
+                        null => Math.Min(
+                            weapon.StickerSchemaCount,
+                            weapon.LegacyStickerSchemaCount)
+                    };
+                }
+            }
+
+            if ((includePaint || includeStickers || includeKeychain)
+                && selection is not null
                 && _weaponItemViews.TryPrepare(
                     state,
                     weapon,
                     selection,
-                    _options.Stickers,
-                    _options.Charms,
+                    includePaint,
+                    includeStickers,
+                    includeKeychain,
+                    stickerSchemaCount,
                     player.SteamID,
                     out var itemViewHandle))
             {
@@ -243,7 +321,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
 
     private HookResult OnItemPickup(EventItemPickup @event, GameEventInfo info)
     {
-        if (!_options.Enabled || !_options.Knives || _applicator is null)
+        if (_applicator is null)
             return HookResult.Continue;
         if (string.IsNullOrEmpty(@event.Item)
             || (!@event.Item.Contains("knife", StringComparison.Ordinal)
@@ -253,7 +331,8 @@ public sealed class BotRandomizerPlugin : BasePlugin
         }
 
         var state = GetOrCreateState(@event.Userid);
-        if (state is null)
+        if (state is null
+            || TryGetWritePolicy(state, out var writePolicy) && writePolicy.Knife)
             return HookResult.Continue;
 
         ScheduleKnifeSync(state.Slot, state.UserId, state.Generation, nextFrame: true);
@@ -286,30 +365,27 @@ public sealed class BotRandomizerPlugin : BasePlugin
             (byte)@event.Team,
             preserveMusic: true,
             music => _roller.RollLoadout((byte)@event.Team, music));
-        if (_options.Enabled)
-        {
-            var slot = player.Slot;
-            AddTimer(
-                0.10f,
-                () => RestoreBot(
-                    slot,
-                    CosmeticScope.Agent | CosmeticScope.Knife | CosmeticScope.Gloves),
-                TimerFlags.STOP_ON_MAPCHANGE);
-        }
+        var slot = player.Slot;
+        AddTimer(
+            0.10f,
+            () => RestoreBot(
+                slot,
+                CosmeticScope.Agent | CosmeticScope.Knife | CosmeticScope.Gloves),
+            TimerFlags.STOP_ON_MAPCHANGE);
         return HookResult.Continue;
     }
 
     private HookResult OnRoundMvp(EventRoundMvp @event, GameEventInfo info)
     {
-        if (!_options.Enabled || !_options.Music)
-            return HookResult.Continue;
-
         var state = GetOrCreateState(@event.Userid);
         var player = @event.Userid;
         if (state is null || player is null)
         {
             return HookResult.Continue;
         }
+
+        if (TryGetWritePolicy(state, out var writePolicy) && writePolicy.MusicKit)
+            return HookResult.Continue;
 
         ApplyMusicKit(player, state.Loadout.MusicKit, 0);
         @event.Musickitid = state.Loadout.MusicKit;
@@ -344,13 +420,14 @@ public sealed class BotRandomizerPlugin : BasePlugin
     {
         if (_applicator is null)
             return;
+        TryGetWritePolicy(state, out var writePolicy);
 
-        if ((scope & CosmeticScope.Agent) != 0 && _options.Agents)
+        if ((scope & CosmeticScope.Agent) != 0 && writePolicy?.Agent != true)
         {
             _applicator.ApplyAgent(pawn, state.Loadout.AgentModel);
         }
 
-        if ((scope & CosmeticScope.MusicKit) != 0 && _options.Music)
+        if ((scope & CosmeticScope.MusicKit) != 0 && writePolicy?.MusicKit != true)
         {
             ApplyMusicKit(player, state.Loadout.MusicKit, 0);
         }
@@ -368,13 +445,14 @@ public sealed class BotRandomizerPlugin : BasePlugin
         {
             return;
         }
+        TryGetWritePolicy(state, out var writePolicy);
 
-        if ((scope & CosmeticScope.Knife) != 0 && _options.Knives)
+        if ((scope & CosmeticScope.Knife) != 0 && writePolicy?.Knife != true)
         {
             _applicator.ApplyKnife(player, pawn, state.Loadout.Knife);
         }
 
-        if ((scope & CosmeticScope.Gloves) != 0 && _options.Gloves)
+        if ((scope & CosmeticScope.Gloves) != 0 && writePolicy?.Gloves != true)
         {
             if (_applicator.ApplyGloves(player, pawn, state.Loadout.Glove))
             {
@@ -389,8 +467,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
                             out _,
                             out var currentPawn,
                             out _)
-                        && currentPawn.Handle == pawnHandle
-                        && _options.Gloves)
+                        && currentPawn.Handle == pawnHandle)
                     {
                         _applicator.ShowGloves(currentPawn);
                     }
@@ -423,8 +500,8 @@ public sealed class BotRandomizerPlugin : BasePlugin
         void Callback()
         {
             if (_applicator is not null
-                && _options.Knives
-                && TryResolveCurrentBot(slot, userId, generation, out _, out var pawn, out _))
+                && TryResolveCurrentBot(slot, userId, generation, out _, out var pawn, out var state)
+                && !(TryGetWritePolicy(state, out var writePolicy) && writePolicy.Knife))
             {
                 _applicator.SyncPickedUpKnife(pawn);
             }
@@ -447,7 +524,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
         player = null!;
         pawn = null!;
         state = null!;
-        if (!_options.Enabled || !_states.IsCurrent(slot, userId, generation))
+        if (!_states.IsCurrent(slot, userId, generation))
             return false;
 
         var resolved = Utilities.GetPlayerFromSlot(slot);
@@ -506,58 +583,7 @@ public sealed class BotRandomizerPlugin : BasePlugin
         }
     }
 
-    [ConsoleCommand("br_status", "Show BotRandomizer runtime status")]
-    public void OnStatusCommand(CCSPlayerController? player, CommandInfo command)
-    {
-        command.ReplyToCommand(
-            $"BotRandomizer version={ModuleVersion} "
-            + $"enabled={Format(_options.Enabled)} native={Format(_applicator?.NativeAvailable == true)} "
-            + $"weapon_prebuild={Format(_weaponItemViews?.NativeAvailable == true)} "
-            + $"catalog={(_catalog is null ? "invalid" : _catalog.SourceCommit[..12])}");
-        command.ReplyToCommand(
-            $"weapons={Format(_options.Weapons)} knives={Format(_options.Knives)} "
-            + $"gloves={Format(_options.Gloves)} agents={Format(_options.Agents)} "
-            + $"music={Format(_options.Music)} stickers={Format(_options.Stickers)} "
-            + $"charms={Format(_options.Charms)} states={_states.States.Count}");
-    }
-
-    [ConsoleCommand("br_set", "Set a BotRandomizer runtime option")]
-    [RequiresPermissions("@css/cvar")]
-    public void OnSetCommand(CCSPlayerController? player, CommandInfo command)
-    {
-        if (command.ArgCount != 3 || !TryParseBoolean(command.GetArg(2), out var value))
-        {
-            command.ReplyToCommand(
-                "Usage: br_set <enabled|weapons|knives|gloves|agents|music|stickers|charms> <on|off>");
-            return;
-        }
-
-        var scope = command.GetArg(1).ToLowerInvariant() switch
-        {
-            "enabled" => SetOption(() => _options.Enabled = value, CosmeticScope.All),
-            "weapons" => SetOption(() => _options.Weapons = value, CosmeticScope.Weapons),
-            "knives" => SetOption(() => _options.Knives = value, CosmeticScope.Knife),
-            "gloves" => SetOption(() => _options.Gloves = value, CosmeticScope.Gloves),
-            "agents" => SetOption(() => _options.Agents = value, CosmeticScope.Agent),
-            "music" => SetOption(() => _options.Music = value, CosmeticScope.MusicKit),
-            "stickers" => SetOption(() => _options.Stickers = value, CosmeticScope.Weapons),
-            "charms" => SetOption(() => _options.Charms = value, CosmeticScope.Weapons),
-            _ => CosmeticScope.None
-        };
-
-        if (scope == CosmeticScope.None)
-        {
-            command.ReplyToCommand("Unknown BotRandomizer option.");
-            return;
-        }
-
-        command.ReplyToCommand($"{command.GetArg(1)}={Format(value)}");
-        if (_options.Enabled && (value || scope == CosmeticScope.Weapons))
-            RestoreAllBots(scope);
-    }
-
     [ConsoleCommand("br_reroll", "Queue new loadouts for the next safe spawn")]
-    [RequiresPermissions("@css/cvar")]
     public void OnRerollCommand(CCSPlayerController? player, CommandInfo command)
     {
         if (_roller is null)
@@ -599,17 +625,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
             $"Queued {bots.Length} bot loadout(s) for the next safe spawn.");
     }
 
-    private CosmeticScope SetOption(Action setter, CosmeticScope scope)
-    {
-        setter();
-        foreach (var state in _states.States)
-        {
-            _states.BumpGeneration(state.Slot);
-            _applicator?.ClearSlot(state.Slot);
-        }
-        return scope;
-    }
-
     private void ConsumePendingReroll(CCSPlayerController? player)
     {
         if (_roller is null
@@ -643,30 +658,6 @@ public sealed class BotRandomizerPlugin : BasePlugin
         return player is { IsValid: true, IsBot: true, IsHLTV: false } ? player : null;
     }
 
-    private static bool TryParseBoolean(string value, out bool result)
-    {
-        switch (value.Trim().ToLowerInvariant())
-        {
-            case "1":
-            case "on":
-            case "true":
-            case "yes":
-                result = true;
-                return true;
-            case "0":
-            case "off":
-            case "false":
-            case "no":
-                result = false;
-                return true;
-            default:
-                result = false;
-                return false;
-        }
-    }
-
-    private static string Format(bool value) => value ? "on" : "off";
-
     private static void ApplyMusicKit(CCSPlayerController player, int kitId, int musicKitMvps)
     {
         var inventory = player.InventoryServices;
@@ -682,6 +673,20 @@ public sealed class BotRandomizerPlugin : BasePlugin
         Utilities.SetStateChanged(player, "CCSPlayerController", "m_iMusicKitMVPs");
         player.MvpNoMusic = false;
         Utilities.SetStateChanged(player, "CCSPlayerController", "m_bMvpNoMusic");
+    }
+
+    private bool TryGetWritePolicy(
+        SlotCosmeticState state,
+        out CosmeticWritePolicy policy)
+    {
+        if (_writeLeases.TryGetPolicy(state.Slot, state.Incarnation, out var resolved, out _))
+        {
+            policy = resolved;
+            return true;
+        }
+
+        policy = null!;
+        return false;
     }
 
 }

@@ -49,8 +49,9 @@ charm.
   purchases, so the final M4A4, M4A1-S, MP5-SD, and PP-Bizon no longer depend
   on guessed post-purchase retry delays.
 - Knife and glove writes are fingerprinted by bot, pawn, entity, and cosmetic
-  selection. Spawn retries become no-ops after the intended economic state has
-  already been installed.
+  selection. Knife retries preserve the installed economic state while
+  reasserting its asynchronous subclass transition; glove retries become
+  no-ops once their intended state is current.
 - Per-slot callbacks capture both the user ID and loadout generation. Stale
   callbacks cannot write after a team change, reroll, disconnect, slot reuse,
   or map transition.
@@ -58,10 +59,106 @@ charm.
 The runtime catalog records the parser hash and demo-corpus digest used to
 derive its compact knife preferences.
 
+## External cosmetic writer leases
+
+Version 1.5 exposes the CounterStrikeSharp capability
+`botrandomizer:cosmetic-writer:v1` through the separate `BotRandomizerApi`
+assembly. It is a write-permission contract, not a second inventory database:
+the external plugin keeps and validates its own positive evidence, while
+BotRandomizer remains the only fallback owner.
+
+The contract is field-granular:
+
+- agent, knife, gloves, and music kit are independent claims;
+- each weapon definition independently claims paint, stickers, and keychain;
+- omitted fields remain randomized by BotRandomizer;
+- default/original items and missing evidence must be omitted rather than
+  claimed;
+- a positive sticker or keychain claim owns that whole attachment family for
+  the weapon. An empty family is not a claim.
+
+For example, demo evidence containing a knife but no gloves claims only
+`Knife`; BotRandomizer still supplies gloves. AK-47 evidence claims only weapon
+definition `7`; an M4A4 or M4A1-S not present in the evidence keeps its random
+selection. This avoids separate "demo loaded" and "no demo" loadout state
+machines.
+
+Consumers first call `TryGetManagedBot`, then acquire a lease using the returned
+`Slot` and `Incarnation`. Incarnations prevent a stale lease from following a
+reused player slot. A lease must be heartbeated more frequently than the
+advertised four-second timeout, replaced when its positive evidence set
+changes, and released on stop or unload. Disconnects, map changes, provider
+restart, and heartbeat expiry revoke it automatically.
+
+```csharp
+var capability = new PluginCapability<IBotRandomizerApi>(
+    BotRandomizerContract.Capability);
+var api = capability.Get();
+
+if (api != null && api.TryGetManagedBot(slot, out var bot))
+{
+    var lease = api.AcquireWriteLease(
+        BotRandomizerContract.DemoTracerOwner,
+        [
+            new BotRandomizerCosmeticWriteClaim
+            {
+                Slot = bot.Slot,
+                Incarnation = bot.Incarnation,
+                SubjectSteamId = replaySteamId,
+                Knife = replayKnifeHasPositiveEvidence,
+                Weapons =
+                [
+                    new BotRandomizerWeaponWriteClaim
+                    {
+                        WeaponDefinitionIndex = 7,
+                        Paint = true,
+                        Stickers = replayAkStickers.Count > 0,
+                        Keychain = replayAkCharms.Count > 0,
+                        PaintUsesLegacyModel = replayAkPaintUsesLegacyModel
+                    }
+                ]
+            }
+        ]);
+}
+```
+
+The external writer must write only fields it successfully leased and remains
+responsible for definition indexes, paint kits, sticker IDs, model paths, wear,
+and other economic values. A reviewed `ianlucas/cs2-lib`-style catalog is the
+recommended source. When an external paint is leased but its stickers are not,
+`PaintUsesLegacyModel` selects the correct random sticker schema; leaving it
+`null` uses the safe intersection of the legacy and current schemas.
+
+An external paint writer must update texture attributes by name and preserve
+unclaimed sticker and keychain attributes. Clearing the complete dynamic
+attribute lists would erase Randomizer-owned fallback fields and violate the
+lease even if the later writes are individually correct.
+
+Weapon claims affect construction through BotRandomizer's `GiveNamedItem`
+pre-hook. The evidence writer should acquire before inventory construction and
+apply its leased values in a post-hook or later. BotRandomizer never rewrites a
+live gun merely to restore fallback ownership; that takes effect on the next
+weapon construction. Agent, knife, glove, and music ownership changes are
+reconciled immediately through the existing safe callbacks.
+
+For DemoTracer specifically, build claims after `NormalizeReplayCosmetics` and
+after BotHider has authenticated the replay Steam ID to a managed bot, but
+before DemoTracer reconstructs that bot's inventory. A non-null knife, glove,
+or agent becomes the matching claim; each positive weapon record becomes a
+claim for its definition, with sticker/keychain ownership enabled only when
+that evidence family is present. In lease mode DemoTracer must bypass its
+"clear missing knife/glove" branches and must not run cosmetic writes at all if
+lease acquisition fails. BotHider continues to own Steam-ID-to-slot identity;
+BotRandomizer's incarnation only guards the resulting live slot against reuse.
+
 ## Runtime behavior
 
 - Each `(bot slot, weapon definition)` gets one stable weapon selection until a
   team change, map change, or explicit reroll.
+- A bot's default knife receives its final definition, owner identity, and
+  paint attributes in the `GiveNamedItem` pre-hook. Scheduled live passes then
+  reassert `ChangeSubclass` and the fallback-paint network fields, keeping the
+  model, animations, HUD, and material on one cosmetic selection.
 - Weapon entities are born with their complete cosmetic state through the
   `GiveNamedItem` pre-hook. Only the constructed item view's
   `NetworkedDynamicAttributes` list is populated; no live-weapon attribute list
@@ -83,18 +180,17 @@ derive its compact knife preferences.
   weapon-aware default attachment position.
 - Charm seeds stay in CS2's valid `1..100000` range.
 - Sticker Slab (keychain definition `37`) also receives a real sticker kit ID.
-- Weapon setting changes and rerolls affect the next weapon constructed for
-  that bot. They deliberately do not rewrite a gun that is already live.
+- Rerolls affect the next weapon constructed for that bot. They deliberately do
+  not rewrite a gun that is already live.
 
 ## Commands
 
 ```text
-br_status
-br_set <enabled|weapons|knives|gloves|agents|music|stickers|charms> <on|off>
 br_reroll [all|slot]
 ```
 
-Changing settings and rerolling require `@css/cvar`. `br_status` is read-only.
+`br_reroll` does not require an admin permission and applies each queued
+loadout on that bot's next safe spawn.
 
 ## Build and validate
 
@@ -111,7 +207,9 @@ guns), compact weighted distributions, integer attribute bit encoding, process-u
 custom item IDs, sticker schema bounds, Sticker Slab payloads, keychain seed
 bounds, demo-observed weapon-specific charm placement, 70% charm probability,
 wear-cache isolation, the 70/30 knife-type split, coherent Holo/Gold
-four-sticker themes, and non-overlapping weapon sticker schemas.
+four-sticker themes, non-overlapping weapon sticker schemas, field-granular
+lease ownership, stale-incarnation rejection, atomic lease replacement, and
+heartbeat expiry.
 
 ## Rebuild professional demo evidence
 
@@ -178,13 +276,16 @@ observation counts remain in the input evidence reports.
 ## Installation
 
 1. Build or download the release.
-2. Place `BotRandomizer.dll`, `cosmetic_catalog.json`, and
+2. Place `BotRandomizerApi.dll` under
+   `addons/counterstrikesharp/shared/BotRandomizerApi/` so providers and
+   consumers resolve the same contract assembly.
+3. Place `BotRandomizer.dll`, `cosmetic_catalog.json`, and
    `charm_placements.json` under
    `addons/counterstrikesharp/plugins/BotRandomizer/`.
-3. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
+4. Set `FollowCS2ServerGuidelines` to `false` in CounterStrikeSharp's
    `configs/core.json`.
-4. Restart the server and check `br_status` before enabling another cosmetic
-   writer.
+5. Restart the server and confirm the plugin loads without catalog errors.
+   External cosmetic writers must acquire the capability lease before writing.
 
 ## Credits and licensing
 

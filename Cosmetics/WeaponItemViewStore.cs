@@ -29,12 +29,9 @@ internal sealed class WeaponItemViewStore : IDisposable
 
     internal bool NativeAvailable => _constructor is not null && _setAttributeByName is not null;
 
-    internal bool TryPrepare(
+    internal bool TryPrepareKnife(
         SlotCosmeticState state,
-        WeaponCatalogEntry weapon,
-        WeaponCosmeticSelection selection,
-        bool includeStickers,
-        bool includeCharms,
+        KnifeSelection selection,
         ulong steamId,
         out nint itemViewHandle)
     {
@@ -44,26 +41,54 @@ internal sealed class WeaponItemViewStore : IDisposable
 
         try
         {
-            var key = (state.Slot, state.UserId, weapon.DefIndex);
-            if (!_views.TryGetValue(key, out itemViewHandle))
-            {
-                var classSize = Schema.GetClassSize("CEconItemView");
-                if (classSize <= 0)
-                    return false;
+            if (!TryGetOrCreateItemView(state, selection.DefIndex, out itemViewHandle))
+                return false;
 
-                itemViewHandle = Marshal.AllocHGlobal(classSize);
-                try
-                {
-                    _constructor.Invoke(itemViewHandle);
-                    _views.Add(key, itemViewHandle);
-                }
-                catch
-                {
-                    Marshal.FreeHGlobal(itemViewHandle);
-                    itemViewHandle = nint.Zero;
-                    throw;
-                }
-            }
+            var item = new CEconItemView(itemViewHandle);
+            var networkedAttributes = item.NetworkedDynamicAttributes;
+            var attributeList = item.AttributeList;
+            if (networkedAttributes.Handle == nint.Zero || attributeList.Handle == nint.Zero)
+                return false;
+
+            item.Initialized = true;
+            item.ItemDefinitionIndex = selection.DefIndex;
+            AssignItemId(item);
+            item.AccountID = AccountIdFromSteamId(steamId);
+            item.EntityQuality = 3;
+
+            networkedAttributes.Attributes.RemoveAll();
+            attributeList.Attributes.RemoveAll();
+            SetTextureAttributes(networkedAttributes, selection.PaintKit, 0, selection.Wear);
+            SetTextureAttributes(attributeList, selection.PaintKit, 0, selection.Wear);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            LogPreparationError(exception);
+            itemViewHandle = nint.Zero;
+            return false;
+        }
+    }
+
+    internal bool TryPrepare(
+        SlotCosmeticState state,
+        WeaponCatalogEntry weapon,
+        WeaponCosmeticSelection selection,
+        bool includePaint,
+        bool includeStickers,
+        bool includeKeychain,
+        int stickerSchemaCount,
+        ulong steamId,
+        out nint itemViewHandle)
+    {
+        itemViewHandle = nint.Zero;
+        if (_disposed || _constructor is null || _setAttributeByName is null)
+            return false;
+
+        try
+        {
+            if (!TryGetOrCreateItemView(state, weapon.DefIndex, out itemViewHandle))
+                return false;
 
             var item = new CEconItemView(itemViewHandle);
             var attributes = item.NetworkedDynamicAttributes;
@@ -77,28 +102,30 @@ internal sealed class WeaponItemViewStore : IDisposable
             item.EntityQuality = 4;
 
             attributes.Attributes.RemoveAll();
-            SetAttribute(attributes, "set item texture prefab", selection.PaintKit);
-            SetAttribute(attributes, "set item texture seed", selection.Seed);
-            SetAttribute(attributes, "set item texture wear", selection.Wear);
+            if (includePaint)
+            {
+                SetAttribute(attributes, "set item texture prefab", selection.PaintKit);
+                SetAttribute(attributes, "set item texture seed", selection.Seed);
+                SetAttribute(attributes, "set item texture wear", selection.Wear);
+            }
 
             if (includeStickers)
             {
-                foreach (var sticker in selection.Stickers)
+                foreach (var sticker in selection.Stickers.Where(sticker =>
+                             sticker.Schema < stickerSchemaCount))
+                {
                     SetStickerAttributes(attributes, sticker);
+                }
             }
 
-            if (includeCharms && selection.Keychain is not null)
+            if (includeKeychain && selection.Keychain is not null)
                 SetKeychainAttributes(attributes, selection.Keychain);
 
             return true;
         }
         catch (Exception exception)
         {
-            if (!_errorLogged)
-            {
-                _errorLogged = true;
-                _logger.LogError(exception, "[BotRandomizer] Failed to prepare a weapon item view");
-            }
+            LogPreparationError(exception);
             itemViewHandle = nint.Zero;
             return false;
         }
@@ -160,6 +187,54 @@ internal sealed class WeaponItemViewStore : IDisposable
 
     private void SetAttribute(CAttributeList attributes, string name, float value)
         => _setAttributeByName!.Invoke(attributes.Handle, name, value);
+
+    private void SetTextureAttributes(
+        CAttributeList attributes,
+        int paintKit,
+        int seed,
+        float wear)
+    {
+        SetAttribute(attributes, "set item texture prefab", paintKit);
+        SetAttribute(attributes, "set item texture seed", seed);
+        SetAttribute(attributes, "set item texture wear", wear);
+    }
+
+    private bool TryGetOrCreateItemView(
+        SlotCosmeticState state,
+        ushort defIndex,
+        out nint itemViewHandle)
+    {
+        var key = (state.Slot, state.UserId, defIndex);
+        if (_views.TryGetValue(key, out itemViewHandle))
+            return true;
+
+        var classSize = Schema.GetClassSize("CEconItemView");
+        if (classSize <= 0)
+            return false;
+
+        itemViewHandle = Marshal.AllocHGlobal(classSize);
+        try
+        {
+            _constructor!.Invoke(itemViewHandle);
+            _views.Add(key, itemViewHandle);
+            return true;
+        }
+        catch
+        {
+            Marshal.FreeHGlobal(itemViewHandle);
+            itemViewHandle = nint.Zero;
+            throw;
+        }
+    }
+
+    private void LogPreparationError(Exception exception)
+    {
+        if (_errorLogged)
+            return;
+
+        _errorLogged = true;
+        _logger.LogError(exception, "[BotRandomizer] Failed to prepare an item view");
+    }
 
     private static void AssignItemId(CEconItemView item)
     {

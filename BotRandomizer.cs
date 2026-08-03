@@ -173,7 +173,7 @@ public sealed partial class BotRandomizerPlugin : BasePlugin
     private void OnClientDisconnect(int playerSlot)
     {
         if (_writeLeases.RevokeSlot(playerSlot, out var affectedSlots))
-            RefreshLeasePolicySlots(affectedSlots);
+            InvalidateLeasePolicySlots(affectedSlots);
         _states.Remove(playerSlot);
         _pendingRerolls.Remove(playerSlot);
         _weaponItemViews?.ClearSlot(playerSlot);
@@ -531,6 +531,7 @@ public sealed partial class BotRandomizerPlugin : BasePlugin
         if (resolved is not { IsValid: true, IsBot: true, IsHLTV: false }
             || resolved.UserId != userId
             || resolved.PlayerPawn?.Value is not { IsValid: true } resolvedPawn
+            || IsPawnControlledByAnotherController(slot, resolvedPawn)
             || !_states.TryGet(slot, out var resolvedState))
         {
             return false;
@@ -540,6 +541,45 @@ public sealed partial class BotRandomizerPlugin : BasePlugin
         pawn = resolvedPawn;
         state = resolvedState;
         return true;
+    }
+
+    private static bool IsPawnControlledByAnotherController(
+        int botSlot,
+        CCSPlayerPawn pawn)
+    {
+        foreach (var controller in Utilities.FindAllEntitiesByDesignerName<CCSPlayerController>(
+                     "cs_player_controller"))
+        {
+            if (controller is not { IsValid: true } || controller.Slot == botSlot)
+                continue;
+
+            bool controllingBot;
+            try
+            {
+                controllingBot = controller.ControllingBot;
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!controllingBot)
+                continue;
+
+            if (controller.PlayerPawn is { IsValid: true, Value.IsValid: true } controlledPawn &&
+                controlledPawn.Value.Index == pawn.Index)
+            {
+                return true;
+            }
+
+            if (controller.OriginalControllerOfCurrentPawn is { IsValid: true, Value.IsValid: true } original &&
+                original.Value.Slot == botSlot)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RestoreBot(int slot, CosmeticScope scope)

@@ -109,7 +109,7 @@ public sealed partial class BotRandomizerPlugin
         if (!_writeLeases.TryAcquire(owner ?? string.Empty, normalized, out var lease, out reason))
             return FailWriteLease(reason);
 
-        RefreshLeasePolicySlots(lease.Claims.Keys);
+        InvalidateLeasePolicySlots(lease.Claims.Keys);
         return SuccessWriteLease(lease);
     }
 
@@ -135,7 +135,7 @@ public sealed partial class BotRandomizerPlugin
             return FailWriteLease(reason);
         }
 
-        RefreshLeasePolicySlots(affectedSlots);
+        InvalidateLeasePolicySlots(affectedSlots);
         return SuccessWriteLease(lease);
     }
 
@@ -143,7 +143,7 @@ public sealed partial class BotRandomizerPlugin
     {
         if (!_writeLeases.TryRelease(leaseToken ?? string.Empty, out var affectedSlots))
             return false;
-        RefreshLeasePolicySlots(affectedSlots);
+        InvalidateLeasePolicySlots(affectedSlots);
         return true;
     }
 
@@ -151,7 +151,7 @@ public sealed partial class BotRandomizerPlugin
     {
         var released = _writeLeases.ReleaseOwner(owner ?? string.Empty, out var affectedSlots);
         if (released > 0)
-            RefreshLeasePolicySlots(affectedSlots);
+            InvalidateLeasePolicySlots(affectedSlots);
         return released;
     }
 
@@ -285,16 +285,21 @@ public sealed partial class BotRandomizerPlugin
     {
         var affectedSlots = _writeLeases.SweepExpired();
         if (affectedSlots.Length > 0)
-            RefreshLeasePolicySlots(affectedSlots);
+            InvalidateLeasePolicySlots(affectedSlots);
     }
 
-    private void RefreshLeasePolicySlots(IEnumerable<int> slots)
+    private void InvalidateLeasePolicySlots(IEnumerable<int> slots)
     {
         foreach (var slot in slots.Distinct())
         {
+            // A lease transition changes write authority; it is not a pawn
+            // lifecycle event. Cancel callbacks captured under the old policy
+            // and forget applicator fingerprints, but never hot-swap the live
+            // pawn back to Randomizer cosmetics here. The next natural spawn,
+            // team, pickup, or item-construction callback will reconcile fields
+            // that are still owned by BotRandomizer.
             _states.BumpGeneration(slot);
             _applicator?.ClearSlot(slot);
-            RestoreBot(slot, CosmeticScope.All);
         }
     }
 

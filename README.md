@@ -136,10 +136,12 @@ lease even if the later writes are individually correct.
 
 Weapon claims affect construction through BotRandomizer's `GiveNamedItem`
 pre-hook. The evidence writer should acquire before inventory construction and
-apply its leased values in a post-hook or later. BotRandomizer never rewrites a
-live gun merely to restore fallback ownership; that takes effect on the next
-weapon construction. Agent, knife, glove, and music ownership changes are
-reconciled immediately through the existing safe callbacks.
+apply its leased values in a post-hook or later. A lease transition only
+changes write authority and cancels callbacks captured under the old policy;
+it never hot-swaps a live pawn. Weapon fallback ownership takes effect on the
+next weapon construction, while agent, knife, glove, and music ownership takes
+effect on the next natural spawn, team, pickup, or item callback. Callbacks
+also refuse to mutate a bot pawn while another controller has taken it over.
 
 For DemoTracer specifically, build claims after `NormalizeReplayCosmetics` and
 after BotHider has authenticated the replay Steam ID to a managed bot, but
